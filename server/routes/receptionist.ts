@@ -39,6 +39,15 @@ router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
   }});
 }));
 
+router.get('/calls', asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data, error } = await db.from('calls')
+    .select('id,direction,status,from_number,to_number,started_at,ended_at,duration_seconds,summary,answered_by')
+    .eq('workspace_id', req.workspaceId!).order('started_at', { ascending: false }).limit(50);
+  if (error) return res.status(500).json({ error: 'CALL_LIST_FAILED' });
+  res.json({ calls: data ?? [] });
+}));
+
 router.put('/', requireRole('owner','admin'), requireSensitiveAuth, validateBody(profileSchema), asyncRoute(async (req: AuthenticatedRequest, res) => {
   if (req.body.enabled) {
     return res.status(409).json({ error: 'RECEPTIONIST_NOT_READY', message: 'Live answering remains locked until the signed Conversation Relay WebSocket is deployed and passes a test call.' });
