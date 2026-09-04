@@ -16,6 +16,7 @@ router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const [
     leads,
     customers,
+    jobCount,
     todaysJobs,
     openQuotes,
     outstandingInvoices,
@@ -27,6 +28,7 @@ router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
   ] = await Promise.all([
     db.from('leads').select('id,stage', { count: 'exact' }).eq('workspace_id', workspaceId).is('deleted_at', null),
     db.from('customers').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId).is('deleted_at', null),
+    db.from('jobs').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId).is('deleted_at', null),
     db.from('jobs').select('id,title,status,scheduled_start,customer_id,customers(display_name)').eq('workspace_id', workspaceId).gte('scheduled_start', startToday.toISOString()).lt('scheduled_start', endToday.toISOString()).order('scheduled_start').limit(12),
     db.from('quotes').select('id,total_cents,status', { count: 'exact' }).eq('workspace_id', workspaceId).in('status', ['sent','viewed','awaiting_approval']),
     db.from('invoices').select('id,balance_due_cents,status').eq('workspace_id', workspaceId).in('status', ['sent','viewed','part_paid','overdue']),
@@ -37,7 +39,7 @@ router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
     db.from('approvals').select('id,resource_type,reason,created_at').eq('workspace_id', workspaceId).eq('status', 'pending').order('created_at').limit(10),
   ]);
 
-  const fail = [leads.error,customers.error,todaysJobs.error,openQuotes.error,outstandingInvoices.error,revenue.error,aiActions.error,overdueInvoices.error,unscheduledJobs.error,pendingApprovals.error].find(Boolean);
+  const fail = [leads.error,customers.error,jobCount.error,todaysJobs.error,openQuotes.error,outstandingInvoices.error,revenue.error,aiActions.error,overdueInvoices.error,unscheduledJobs.error,pendingApprovals.error].find(Boolean);
   if (fail) return res.status(500).json({ error: 'DASHBOARD_READ_FAILED' });
 
   const leadRows = leads.data ?? [];
@@ -49,6 +51,7 @@ router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
   res.json({
     metrics: {
       customers: customers.count ?? 0,
+      jobs: jobCount.count ?? 0,
       leads: leadRows.length,
       newLeads,
       bookedLeads,
