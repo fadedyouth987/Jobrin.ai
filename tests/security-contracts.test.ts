@@ -132,7 +132,11 @@ test('AI receptionist stays fail-closed until the signed live conversation engin
   assert.match(receptionistSource, /if \(req\.body\.enabled\)/);
   assert.match(receptionistSource, /RECEPTIONIST_NOT_READY/);
   assert.match(receptionistSource, /twilioSignatureGuard\('\/api\/twilio\/voice'\)/);
-  assert.match(receptionistSource, /conversationRelay: false/);
+  // The signed live engine now exists; the lock is conditional on real
+  // dependencies (Twilio, AI key, HTTPS, attached engine) instead of a hard ban.
+  assert.doesNotMatch(receptionistSource, /conversationRelay: false/);
+  assert.match(receptionistSource, /isReceptionistEngineAttached\(\)/);
+  assert.match(receptionistSource, /issueCallToken\(/);
 });
 
 test('receptionist configuration is tenant isolated and stores no provider credentials', () => {

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import twilio from 'twilio';
 import { z } from 'zod';
 import { env } from '../env';
+import { issueCallToken, isReceptionistEngineAttached, simulateReceptionistTurn } from '../ai/receptionistCall';
 import { normalizeE164, twilioConfigured } from '../providers/twilio';
 import { asyncRoute, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireSensitiveAuth, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
@@ -35,7 +36,7 @@ router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
   if (error) return res.status(500).json({ error: 'RECEPTIONIST_PROFILE_LOAD_FAILED' });
   res.json({ profile: data, readiness: {
     twilio: twilioConfigured(), ai: Boolean(env.OPENAI_API_KEY), securePublicUrl: env.APP_URL.startsWith('https://'),
-    conversationRelay: false,
+    conversationRelay: isReceptionistEngineAttached(),
   }});
 }));
 
@@ -50,13 +51,34 @@ router.get('/calls', asyncRoute(async (req: AuthenticatedRequest, res) => {
 
 router.put('/', requireRole('owner','admin'), requireSensitiveAuth, validateBody(profileSchema), asyncRoute(async (req: AuthenticatedRequest, res) => {
   if (req.body.enabled) {
-    return res.status(409).json({ error: 'RECEPTIONIST_NOT_READY', message: 'Live answering remains locked until the signed Conversation Relay WebSocket is deployed and passes a test call.' });
+    // Fail closed: live answering unlocks only when every dependency is real.
+    const missing: string[] = [];
+    if (!twilioConfigured()) missing.push('Twilio number');
+    if (!env.OPENAI_API_KEY) missing.push('AI engine (OpenAI key)');
+    if (!env.APP_URL.startsWith('https://')) missing.push('public HTTPS address');
+    if (!isReceptionistEngineAttached()) missing.push('conversation engine');
+    if (missing.length) {
+      return res.status(409).json({ error: 'RECEPTIONIST_NOT_READY', message: `Live answering stays locked until: ${missing.join(', ')}.` });
+    }
   }
   const db = createUserClient(req.auth!.accessToken);
   const { data, error } = await db.from('receptionist_profiles').upsert({ ...req.body, workspace_id: req.workspaceId!, updated_at: new Date().toISOString() }).select('*').single();
   if (error) return res.status(400).json({ error: 'RECEPTIONIST_PROFILE_SAVE_FAILED' });
   await writeAudit(req, 'receptionist.profile_updated', 'receptionist_profile', req.workspaceId!, { enabled: data.enabled, voice: data.voice_id });
   res.json({ profile: data });
+}));
+
+const simulateSchema = z.object({
+  message: z.string().trim().min(1).max(1000),
+  history: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().min(1).max(1000) })).max(16).default([]),
+}).strict();
+
+// Text-mode preview of the exact engine a phone call uses. Owner/admin/manager
+// only; never sends anything and never touches the phone network.
+router.post('/simulate', requireRole('owner', 'admin', 'manager'), validateBody(simulateSchema), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const result = await simulateReceptionistTurn(req.workspaceId!, req.body.message, req.body.history);
+  await writeAudit(req, 'receptionist.simulated', 'receptionist_profile', req.workspaceId!, { configured: result.configured, messageTaken: result.messageTaken });
+  res.json(result);
 }));
 
 webhookRouter.post('/voice', twilioSignatureGuard('/api/twilio/voice'), asyncRoute(async (req, res) => {
@@ -72,10 +94,12 @@ webhookRouter.post('/voice', twilioSignatureGuard('/api/twilio/voice'), asyncRou
     return res.type('text/xml').send(response.toString());
   }
   await supabaseAdmin.from('calls').upsert({ workspace_id: integration.workspace_id, provider: 'twilio', provider_call_id: callSid, direction: 'inbound', from_number: from, to_number: to, status: 'in_progress', answered_by: 'ai_receptionist', started_at: new Date().toISOString(), recording_status: profile.recording_enabled ? 'pending_consent' : 'off' }, { onConflict: 'workspace_id,provider,provider_call_id' });
+  const callToken = issueCallToken(integration.workspace_id, callSid);
   const connect = response.connect({ action: `${env.APP_URL.replace(/\/$/,'')}/api/twilio/voice/complete` });
-  const relay = connect.conversationRelay({ url: websocketUrl(), welcomeGreeting: profile.greeting, language: profile.language, ttsProvider: profile.voice_provider, voice: profile.voice_id, interruptible: 'any' });
+  const relay = connect.conversationRelay({ url: `${websocketUrl()}?token=${encodeURIComponent(callToken)}`, welcomeGreeting: profile.greeting, language: profile.language, ttsProvider: profile.voice_provider, voice: profile.voice_id, interruptible: 'any' });
   relay.parameter({ name: 'workspaceId', value: integration.workspace_id });
   relay.parameter({ name: 'callSid', value: callSid });
+  relay.parameter({ name: 'fromNumber', value: from });
   res.type('text/xml').send(response.toString());
 }));
 

@@ -4,6 +4,7 @@ import { app, finalizeApp } from './server';
 import { env } from './server/env';
 import { startBusinessBrainWorker } from './server/ai/businessBrainWorker';
 import { startAutomationRunner } from './server/automation/runner';
+import { attachReceptionistWebSocket } from './server/ws/receptionistSocket';
 
 async function startServer() {
   // Runtime mode controls whether Vite middleware is needed. Deployment stage
@@ -32,11 +33,12 @@ async function startServer() {
   });
 
   finalizeApp();
-  app.listen(env.PORT, '0.0.0.0', () => {
+  const server = app.listen(env.PORT, '0.0.0.0', () => {
     console.log(JSON.stringify({ level: 'info', message: 'Jobryn server started', port: env.PORT, environment: env.NODE_ENV }));
     if (env.SUPABASE_SERVICE_ROLE_KEY && env.OPENAI_API_KEY) startBusinessBrainWorker();
     if (env.SUPABASE_SERVICE_ROLE_KEY) startAutomationRunner();
   });
+  attachReceptionistWebSocket(server);
 }
 
 void startServer();
