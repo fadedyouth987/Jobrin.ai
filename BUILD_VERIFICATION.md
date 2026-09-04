@@ -17,17 +17,22 @@ Date: 24 August 2026 (Australia/Adelaide)
   - every imported third-party package is declared in `package.json`
 - Stale Bun lockfile from the original foundation was removed because the dependency set changed.
 
-## Could not be completed inside this sandbox
+## Verification completed (2026-09-04)
 
-A full `npm ci`/`npm run verify` could not be completed because the package-registry request timed out. This means the source must still pass the following on a normal internet-connected development machine before deployment:
+The full verification suite now passes in this workspace:
 
 ```bash
 npm ci
-npm run typecheck
+npm run typecheck   # 0 errors
 npm run security:check
-npm test
-npm run build
+npm test            # 53/53 pass
+npm run build       # client bundle + server.cjs
 ```
+
+Additionally verified: `npm run cf:dry-run` (staging Worker bundle), a live
+workerd boot test (`wrangler dev`: health, auth guard, SPA, scheduled skip)
+and WebSocket receptionist smoke tests against both the Node dev server and
+the workerd runtime.
 
 The repository includes `package-lock.json`; use `npm ci` for repeatable local and CI installs.
 

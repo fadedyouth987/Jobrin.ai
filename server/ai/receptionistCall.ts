@@ -292,8 +292,8 @@ export class ReceptionistSession {
   async finalize(): Promise<string | null> {
     const summary = this.transcript.slice(-12).join(' | ').slice(0, 2000);
     try {
-      const patch: Record<string, unknown> = { summary, updated_at: new Date().toISOString() };
-      if (this.messageTaken) patch.outcome = 'message_taken';
+      const finalSummary = this.messageTaken ? `[message taken] ${summary}`.slice(0, 2000) : summary;
+      const patch: Record<string, unknown> = { summary: finalSummary, updated_at: new Date().toISOString() };
       await supabaseAdmin.from('calls').update(patch).eq('workspace_id', this.workspaceId).eq('provider_call_id', this.callSid);
     } catch {
       // Without the service-role key the summary stays in memory only.

@@ -3,6 +3,7 @@ import type { ErrorRequestHandler, NextFunction, Request, RequestHandler, Respon
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import { TimerFreeMemoryStore } from './rateLimitStore';
 import type { ZodTypeAny } from 'zod';
 import { env } from './env';
 
@@ -54,6 +55,7 @@ export function securityMiddleware(): RequestHandler[] {
 }
 
 export const globalRateLimit = rateLimit({
+  store: new TimerFreeMemoryStore(),
   windowMs: 60_000,
   limit: 240,
   standardHeaders: 'draft-8',
@@ -62,6 +64,7 @@ export const globalRateLimit = rateLimit({
 });
 
 export const authRateLimit = rateLimit({
+  store: new TimerFreeMemoryStore(),
   windowMs: 10 * 60_000,
   limit: 30,
   standardHeaders: 'draft-8',
@@ -69,6 +72,7 @@ export const authRateLimit = rateLimit({
 });
 
 export const billingRateLimit = rateLimit({
+  store: new TimerFreeMemoryStore(),
   windowMs: 60_000,
   limit: 20,
   standardHeaders: 'draft-8',

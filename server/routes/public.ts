@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { z } from 'zod';
 import { asyncRoute } from '../security';
 import { rateLimit } from 'express-rate-limit';
+import { TimerFreeMemoryStore } from '../rateLimitStore';
 import { supabaseAdmin } from '../supabase';
 
 // Public customer-facing document links. Capability is the unguessable token in
@@ -24,6 +25,7 @@ export function canDecideQuote(from: string, to: string) {
 }
 
 export const publicRateLimit = rateLimit({
+  store: new TimerFreeMemoryStore(),
   windowMs: 60_000,
   limit: 60,
   standardHeaders: 'draft-8',
