@@ -1,0 +1,50 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "jobryn",
+  "main": "worker.ts",
+  "workers_dev": true,
+  "preview_urls": false,
+  "compatibility_date": "2026-08-28",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "enable_nodejs_http_modules",
+    "enable_nodejs_http_server_modules"
+  ],
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  "vars": {
+    "CLOUDFLARE_WORKER": "true",
+    "NODE_ENV": "production",
+    "DEPLOYMENT_STAGE": "production",
+    "APP_URL": "https://jobryn.org",
+    "CORS_ORIGINS": "https://jobryn.org,https://www.jobryn.org",
+    "TRUST_PROXY": "1",
+    "REQUIRE_AAL2_SENSITIVE": "true",
+    "REQUIRE_EMAIL_VERIFICATION": "true"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "env": {
+    "staging": {
+      "name": "jobryn-staging",
+      "vars": {
+        "CLOUDFLARE_WORKER": "true",
+        "NODE_ENV": "test",
+        "DEPLOYMENT_STAGE": "staging",
+        "APP_URL": "https://jobryn-staging.nexgen-studio.workers.dev",
+        "CORS_ORIGINS": "https://jobryn-staging.nexgen-studio.workers.dev",
+        "TRUST_PROXY": "1",
+        "REQUIRE_AAL2_SENSITIVE": "true",
+        "REQUIRE_EMAIL_VERIFICATION": "true"
+      }
+    }
+  }
+}
