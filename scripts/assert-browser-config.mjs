@@ -1,7 +1,21 @@
+import { readFileSync } from 'node:fs';
+
 const target = process.argv[2];
 
 if (!['staging', 'production'].includes(target)) {
   throw new Error('Usage: node scripts/assert-browser-config.mjs <staging|production>');
+}
+
+// Vite loads .env for the bundle, but plain Node scripts do not. Accept the
+// project's .env as a build-environment source so the gate reflects the same
+// values Vite will embed, while still rejecting placeholders.
+try {
+  for (const line of readFileSync('.env', 'utf8').split(/\r?\n/)) {
+    const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
+    if (match && !process.env[match[1]]) process.env[match[1]] = match[2].trim();
+  }
+} catch {
+  // No .env file: the operator must export values in the build environment.
 }
 
 const required = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'];
