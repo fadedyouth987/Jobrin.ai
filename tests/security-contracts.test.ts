@@ -166,7 +166,9 @@ test('Cloudflare deployment requires a browser Supabase build configuration and 
   assert.match(browserConfigGuard, /VITE_SUPABASE_ANON_KEY/);
   assert.match(wranglerSource, /"crons": \["\*\/5 \* \* \* \*"\]/);
   assert.match(workerSource, /processBusinessBrainQueue/);
-  // The Brain queue must be passed to ctx.waitUntil, directly or alongside the
-  // automation runner in the same scheduled tick.
-  assert.match(workerSource, /ctx\.waitUntil\([\s\S]*processBusinessBrainQueue\(\)/);
+  // The Brain queue must run on the cron tick (directly or in a guarded jobs
+  // list passed to ctx.waitUntil) and must be skipped when unconfigured.
+  assert.match(workerSource, /processBusinessBrainQueue\(\)/);
+  assert.match(workerSource, /ctx\.waitUntil\(Promise\.all\(jobs\)\)/);
+  assert.match(workerSource, /SUPABASE_SERVICE_ROLE_KEY/);
 });
