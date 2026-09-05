@@ -6,7 +6,7 @@ import { env } from '../env';
 import { sendEmail, emailConfigured } from '../providers/email';
 import { hashShareToken, canDecideQuote } from './public';
 import { stripe } from './billing';
-import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireSensitiveAuth, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
+import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireSensitiveAuth, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit, writeNotification } from '../supabase';
 
 const router = Router();
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('booking.core'));
@@ -203,6 +203,114 @@ router.delete('/jobs/:id/materials/:materialId', requireRole('owner', 'admin', '
   if (!data) return res.status(404).json({ error: 'MATERIAL_NOT_FOUND' });
   await writeAudit(req, 'job.materials.removed', 'job_material', String(req.params.materialId), {}, 'warning');
   res.json({ ok: true });
+}));
+
+// ---------- Field Completion Pack ----------
+
+// Photos: upload via base64 to Supabase Storage (vantory-assets bucket)
+router.post('/jobs/:id/photos', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(z.object({
+  file_name: z.string().trim().min(1).max(255),
+  mime_type: z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4']),
+  data: z.string().max(35_000_000),
+})), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data: job, error: jobError } = await db.from('jobs').select('id').eq('workspace_id', req.workspaceId!).eq('id', req.params.id).maybeSingle();
+  if (jobError) return res.status(500).json({ error: 'JOB_READ_FAILED' });
+  if (!job) return res.status(404).json({ error: 'JOB_NOT_FOUND' });
+  const buffer = Buffer.from(req.body.data, 'base64');
+  if (!buffer.length) return res.status(400).json({ error: 'EMPTY_FILE' });
+  if (buffer.length > 25 * 1024 * 1024) return res.status(400).json({ error: 'FILE_TOO_LARGE' });
+  const ext = req.body.file_name.split('.').pop() || 'jpg';
+  const path = `${req.workspaceId}/${req.params.id}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
+  const { error: uploadError } = await supabaseAdmin.storage.from('vantory-assets').upload(path, buffer, { contentType: req.body.mime_type });
+  if (uploadError) return res.status(500).json({ error: 'UPLOAD_FAILED', message: uploadError.message });
+  await writeAudit(req, 'job.photo.uploaded', 'job', req.params.id, { fileName: req.body.file_name });
+  res.status(201).json({ ok: true, path });
+}));
+
+router.get('/jobs/:id/photos', requireRole('owner', 'admin', 'manager', 'staff'), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data: job, error: jobError } = await db.from('jobs').select('id').eq('workspace_id', req.workspaceId!).eq('id', req.params.id).maybeSingle();
+  if (jobError || !job) return res.status(404).json({ error: 'JOB_NOT_FOUND' });
+  const { data: files, error } = await supabaseAdmin.storage.from('vantory-assets').list(`${req.workspaceId}/${req.params.id}`, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } });
+  if (error) return res.status(500).json({ error: 'PHOTO_LIST_FAILED' });
+  const photos = await Promise.all((files ?? []).filter((f: any) => f.name !== '.emptyFolderPlaceholder').map(async (f: any) => {
+    const { data: signed } = await supabaseAdmin.storage.from('vantory-assets').createSignedUrl(`${req.workspaceId}/${req.params.id}/${f.name}`, 3600);
+    return { name: f.name, size: f.metadata?.size || 0, mime: f.metadata?.mimetype || '', url: signed?.signedUrl || null, created_at: f.created_at || null };
+  }));
+  res.json({ photos });
+}));
+
+router.delete('/jobs/:id/photos/:photoName', requireRole('owner', 'admin', 'manager'), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const path = `${req.workspaceId}/${req.params.id}/${req.params.photoName}`;
+  const { error } = await supabaseAdmin.storage.from('vantory-assets').remove([path]);
+  if (error) return res.status(500).json({ error: 'PHOTO_DELETE_FAILED' });
+  await writeAudit(req, 'job.photo.deleted', 'job', req.params.id, { photo: req.params.photoName }, 'warning');
+  res.json({ ok: true });
+}));
+
+// 3. Checklists
+router.get('/jobs/:id/checklists', requireRole('owner', 'admin', 'manager', 'staff'), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data, error } = await db.from('job_checklists').select('id,template_id,title,results,all_critical_done,completed_by,completed_at,created_at').eq('workspace_id', req.workspaceId!).eq('job_id', req.params.id).order('created_at');
+  if (error) return res.status(500).json({ error: 'CHECKLIST_LIST_FAILED' });
+  res.json({ checklists: data ?? [] });
+}));
+
+router.post('/jobs/:id/checklists', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(z.object({
+  template_id: z.string().uuid().nullable().optional(),
+  title: z.string().trim().min(2).max(200),
+  results: z.array(z.object({ item: z.string().trim().min(1).max(300), done: z.boolean(), critical: z.boolean().default(false), notes: z.string().max(500).default('') })).min(1).max(50),
+})), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data: job, error: jobError } = await db.from('jobs').select('id').eq('workspace_id', req.workspaceId!).eq('id', req.params.id).maybeSingle();
+  if (jobError || !job) return res.status(404).json({ error: 'JOB_NOT_FOUND' });
+  const allCriticalDone = req.body.results.filter((r: any) => r.critical).every((r: any) => r.done);
+  const { data: checklist, error } = await db.from('job_checklists').insert({
+    workspace_id: req.workspaceId!, job_id: job.id, template_id: req.body.template_id || null,
+    title: req.body.title, results: req.body.results, all_critical_done: allCriticalDone, completed_by: req.auth!.userId,
+  }).select('id,title,results,all_critical_done,completed_at,created_at').single();
+  if (error) return res.status(400).json({ error: 'CHECKLIST_CREATE_FAILED', message: error.message });
+  await writeAudit(req, 'job.checklist.completed', 'job_checklist', checklist.id, { title: req.body.title });
+  res.status(201).json({ checklist });
+}));
+
+// 4. Customer signatures
+router.post('/jobs/:id/signatures', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(z.object({
+  customer_name: z.string().trim().min(2).max(160),
+  signature_data: z.string().min(50).max(50_000),
+})), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data: job, error: jobError } = await db.from('jobs').select('id').eq('workspace_id', req.workspaceId!).eq('id', req.params.id).maybeSingle();
+  if (jobError || !job) return res.status(404).json({ error: 'JOB_NOT_FOUND' });
+  const { data: signature, error } = await db.from('job_signatures').insert({
+    workspace_id: req.workspaceId!, job_id: job.id, customer_name: req.body.customer_name,
+    signature_data: req.body.signature_data, ip_address: req.ip,
+  }).select('id,customer_name,signed_at').single();
+  if (error) return res.status(400).json({ error: 'SIGNATURE_CREATE_FAILED', message: error.message });
+  await writeAudit(req, 'job.signature.captured', 'job_signature', signature.id, { customer: req.body.customer_name });
+  res.status(201).json({ signature });
+}));
+
+router.get('/jobs/:id/signatures', requireRole('owner', 'admin', 'manager', 'staff'), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data, error } = await db.from('job_signatures').select('id,customer_name,signed_at').eq('workspace_id', req.workspaceId!).eq('job_id', req.params.id).order('signed_at', { ascending: false });
+  if (error) return res.status(500).json({ error: 'SIGNATURE_LIST_FAILED' });
+  res.json({ signatures: data ?? [] });
+}));
+
+// 5. Print report data (aggregated for the print page)
+router.get('/jobs/:id/report', requireRole('owner', 'admin', 'manager', 'staff'), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data: job, error: jobError } = await db.from('jobs').select('id,job_number,title,description,status,address_text,scheduled_start,scheduled_end,completed_at,customer_id,customers(id,display_name,phone,email)').eq('workspace_id', req.workspaceId!).eq('id', req.params.id).maybeSingle();
+  if (jobError || !job) return res.status(404).json({ error: 'JOB_NOT_FOUND' });
+  const [timeEntries, materials, checklists, signatures] = await Promise.all([
+    db.from('job_time_entries').select('started_at,ended_at,break_minutes,notes').eq('workspace_id', req.workspaceId!).eq('job_id', job.id).order('started_at'),
+    db.from('job_materials').select('description,quantity,unit_cost_cents,unit_price_cents').eq('workspace_id', req.workspaceId!).eq('job_id', job.id),
+    db.from('job_checklists').select('title,results,completed_at').eq('workspace_id', req.workspaceId!).eq('job_id', job.id),
+    db.from('job_signatures').select('customer_name,signed_at').eq('workspace_id', req.workspaceId!).eq('job_id', job.id).order('signed_at', { ascending: false }).limit(1),
+  ]);
+  res.json({ job, time_entries: timeEntries.data ?? [], materials: materials.data ?? [], checklists: checklists.data ?? [], signature: signatures.data?.[0] ?? null });
 }));
 
 export const jobStatusTransitions: Record<string, string[]> = {
