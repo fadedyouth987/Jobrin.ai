@@ -114,3 +114,15 @@ export function EmptyState({ icon, title, description, action, steps }: {
     </div>
   );
 }
+
+// Truth-in-UI: every feature is exactly one of these three states, shown the
+// same way everywhere (capability map, integrations, dashboard, navigation).
+export function FeatureStatus({ state, className = '' }: { state: 'ready' | 'setup' | 'soon'; className?: string }) {
+  const tones = {
+    ready: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+    setup: 'bg-amber-50 text-amber-700 ring-amber-200',
+    soon: 'bg-slate-100 text-slate-600 ring-slate-200',
+  } as const;
+  const labels = { ready: 'Ready', setup: 'Needs setup', soon: 'Coming soon' } as const;
+  return <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset ${tones[state]} ${className}`}>{labels[state]}</span>;
+}

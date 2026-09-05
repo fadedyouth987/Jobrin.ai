@@ -4,7 +4,7 @@ import { useAuth } from '../app/auth';
 import { AppLink, navigate } from '../app/router';
 import { apiFetch, ApiError } from '../lib/api';
 import { supabase } from '../lib/supabase';
-import { Card, EmptyState, Field, Money, PageIntro, PrimaryButton, SecondaryButton, SelectField, SetupChecklist, Spinner, StatCard, StatusPill, TextareaField } from '../components/saas/ui';
+import { Card, EmptyState, FeatureStatus, Field, Money, PageIntro, PrimaryButton, SecondaryButton, SelectField, SetupChecklist, Spinner, StatCard, StatusPill, TextareaField } from '../components/saas/ui';
 
 function useData<T>(path: string, initial: T) {
   const { workspaceId } = useAuth();
@@ -17,6 +17,9 @@ function useData<T>(path: string, initial: T) {
 export function DashboardPage() {
   const query=useData<any>('/api/dashboard',{metrics:{},today:[],attention:[]});
   const onboarding=useData<any>('/api/workspaces/onboarding',{steps:[]});
+  const billing=useData<any>('/api/billing/status',{subscription:null,entitlements:[],stripeConfigured:false});
+  const integrations=useData<any>('/api/integrations',{integrations:[]});
+  const services=useData<any>('/api/services',{services:[]});
   if(query.loading)return <Spinner label="Loading today…"/>;
   if(query.error)return <ErrorBox message={query.error} onRetry={query.refresh}/>;
   const m=query.data.metrics;
@@ -26,6 +29,9 @@ export function DashboardPage() {
     {label:'Add your first customer',description:'Customers link every job, quote, invoice and conversation in one place.',href:'/app/customers',done:(m.customers||0)>0},
     {label:'Create a job',description:'Jobs carry the work from schedule to completion to payment.',href:'/app/jobs',done:(m.jobs||0)>0},
     {label:'Send your first quote',description:'Customers review and accept quotes from a secure link — nothing to print or post.',href:'/app/quotes',done:(m.openQuotes||0)>0},
+    {label:'Connect Stripe (get paid)',description:'Subscription signups and invoice payment links activate the moment Stripe keys are set.',href:'/app/billing',done:billing.data.stripeConfigured===true},
+    {label:'Connect Twilio (text customers)',description:'The SMS inbox, campaigns and the AI receptionist all run on your Twilio number.',href:'/app/integrations',done:(integrations.data.integrations||[]).some((i:any)=>i.provider==='twilio'&&i.status==='connected')},
+    {label:'Set up email delivery',description:'Quotes and invoices emailed straight to customers with a payment link.',href:'/app/integrations',done:false},
   ];
   const cards=[
     {label:'Revenue this month',value:<Money cents={m.monthRevenueCents||0}/>,sub:'Payments received in the calendar month',icon:<CircleDollarSign className="h-4 w-4"/>},
@@ -291,9 +297,109 @@ export function CapabilityMapPage() {
       ['Knowledge','The only facts the AI may share with customers.','/app/knowledge','ready'],
     ]},
   ] as const;
-  const pill=(state:string)=>state==='ready'?<StatusPill tone="green">included</StatusPill>:state==='connect'?<StatusPill tone="amber">connect provider</StatusPill>:<StatusPill tone="indigo">configure</StatusPill>;
+  const pill=(state:string)=>state==='ready'?<FeatureStatus state="ready"/>:state==='connect'?<FeatureStatus state="setup"/>:<FeatureStatus state="soon"/>;
   return <Page title="What Jobryn can do" eyebrow="Capability map" description="Every capability in this workspace and exactly what state it is in. Green means it is live today; amber means connect a provider to switch it on.">{groups.map((group)=><div key={group.label} className="mb-6"><h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">{group.label}</h2><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{group.items.map(([title,desc,href,state])=><AppLink key={href} href={href} className="block"><Card className="h-full p-4 transition hover:border-indigo-300"><div className="flex items-start justify-between gap-2"><p className="font-bold">{title}</p>{pill(state)}</div><p className="mt-1 text-xs leading-5 text-slate-500">{desc}</p></Card></AppLink>)}</div></div>)}</Page>;
 }
+
+export const COMING_SOON_FEATURES: Record<string, { title: string; eyebrow: string; description: string; points: string[] }> = {
+  'gps-dispatch': {
+    title: 'GPS dispatch & live ETA', eyebrow: 'Schedule & Dispatch',
+    description: 'See your crew on a live map, dispatch the closest available technician and give customers an automatic on-the-way text with a real ETA.',
+    points: ['Live technician locations on a map', 'Smart dispatch suggestions by proximity and skills', 'Automatic on-the-way SMS with live ETA', 'Travel-time aware schedule adjustments'],
+  },
+  'job-checklists': {
+    title: 'Job checklists & badges', eyebrow: 'Jobs',
+    description: 'Built-in checklists and job requirements so every job is done right the first time. Critical-information badges highlight hazards, access notes and customer instructions on every job card.',
+    points: ['Reusable checklist templates per service type', 'Required-items enforcement before a job can be completed', 'Critical-information badges on job cards and the schedule', 'Checklist completion stored with the job record'],
+  },
+  'pdf-documents': {
+    title: 'PDF quotes & invoices', eyebrow: 'Quotes & Invoices',
+    description: 'Branded PDF versions of every quote and invoice, generated automatically and attached to emails — alongside the secure online links you already have.',
+    points: ['Branded template with your logo and details', 'Automatic PDF attachment on emailed quotes and invoices', 'Stored permanently with the job record'],
+  },
+  'time-materials': {
+    title: 'Time & Materials log', eyebrow: 'Field Operations',
+    description: 'A workspace-wide log of every technician hour and material across all jobs — who worked what, when, and what it cost.',
+    points: ['Filterable time log across all jobs and technicians', 'Materials ledger with supplier references', 'Job profitability at a glance'],
+  },
+  'checklists-forms': {
+    title: 'Checklists & forms', eyebrow: 'Field Operations',
+    description: 'Custom checklists, safety forms and compliance documents completed on site, stored against the job and exportable as branded PDFs.',
+    points: ['Custom checklist and form templates', 'Completed on any phone or tablet', 'Automatic PDF reports stored with the job'],
+  },
+  'customer-assets': {
+    title: 'Assets & service history', eyebrow: 'Field Operations',
+    description: 'Every customer asset — hot water systems, switchboards, aircons — with its own service history, warranty dates and next-service reminders.',
+    points: ['Asset register per customer', 'Full service history on every asset', 'Warranty and next-service tracking'],
+  },
+  'recurring-jobs': {
+    title: 'Recurring jobs & agreements', eyebrow: 'Field Operations',
+    description: 'Service agreements that automatically schedule recurring work — maintenance plans, filter changes, safety checks — with reminders before each visit.',
+    points: ['Weekly, monthly or custom service cycles', 'Automatic appointment generation with reminders', 'Agreement pricing that flows into invoices'],
+  },
+  'supplier-purchasing': {
+    title: 'Supplier purchasing', eyebrow: 'Field Operations',
+    description: 'Order parts from suppliers, track purchase orders against jobs and import supplier price books so quotes use up-to-date costs.',
+    points: ['Purchase orders linked to jobs', 'Supplier price books for accurate quoting', 'Cost tracking feeds job profitability'],
+  },
+  'ai-recaps': {
+    title: 'AI post-work recaps', eyebrow: 'AI Admin',
+    description: 'After each job, the AI drafts a plain-English work summary you can send to the customer or keep for your records — you review and approve before anything is sent.',
+    points: ['Drafted from the job record and checklist results', 'Review and edit before sending', 'Stored with the job as the work record'],
+  },
+  'voicemail': {
+    title: 'Voicemail transcription', eyebrow: 'AI Admin',
+    description: 'Missed calls go to voicemail, and the AI transcribes the message and alerts you instantly — so missed calls still become jobs.',
+    points: ['Automatic transcription of voicemails', 'Instant alert with the caller and message', 'Feeds the same lead pipeline as calls and SMS'],
+  },
+  'call-recordings': {
+    title: 'Call recordings', eyebrow: 'AI Admin',
+    description: 'Store answered-call recordings with the job record when the caller consents — full quality-assurance history for every conversation.',
+    points: ['Consent prompt enforced before recording', 'Recordings stored against the call', 'Owner-only access with full audit trail'],
+  },
+  'spam-screening': {
+    title: 'Spam & robocall screening', eyebrow: 'AI Admin',
+    description: 'Known spam and robocall numbers are screened out before the receptionist answers — your phone stays clean and your AI minutes stay for real customers.',
+    points: ['Automatic screening of known spam patterns', 'Screened calls logged for review', 'Receptionist only spends time on real customers'],
+  },
+  'multi-numbers': {
+    title: 'Multiple phone numbers', eyebrow: 'AI Admin',
+    description: 'Run several Twilio numbers — one per brand, suburb or campaign — each mapped to the same workspace with its own receptionist settings.',
+    points: ['Multiple numbers on one workspace', 'Per-number routing and reporting', 'Consolidated inbox across all numbers'],
+  },
+  'customer-portal': {
+    title: 'Customer self-service portal', eyebrow: 'Marketing & Reviews',
+    description: 'Your customers log in to see their job history, quotes and invoices, approve work and pay — everything customer-facing in one branded place.',
+    points: ['Job history and quotes for every customer', 'Secure invoice payment', 'Booking requests and approval history'],
+  },
+  'review-automation': {
+    title: 'Automated review requests', eyebrow: 'Marketing & Reviews',
+    description: 'After completed jobs, review invitations send automatically with consent handling — and negative feedback routes to you privately before it ever goes public.',
+    points: ['Automatic requests after completed jobs', 'Consent and suppression checks enforced', 'Private feedback escalation before public posting'],
+  },
+  'accounting-sync': {
+    title: 'Xero, MYOB & QuickBooks', eyebrow: 'Integrations',
+    description: 'Sync customers, invoices and payments straight into your accounting package — no double entry, no end-of-month surprises.',
+    points: ['Two-way customer sync', 'Invoices and payments pushed automatically', 'Works with Xero, MYOB and QuickBooks Online'],
+  },
+  'zapier-api': {
+    title: 'Zapier, webhooks & API', eyebrow: 'Integrations',
+    description: 'Connect Jobryn to anything: Zapier, webhooks and a documented API — leads in from your website, events out to your other tools.',
+    points: ['Outbound webhooks on key events', 'Documented API with workspace keys', 'Zapier triggers for leads, jobs and payments'],
+  },
+  'deploy-health': {
+    title: 'Deployment health & monitoring', eyebrow: 'Settings & Security',
+    description: 'Live status of your deployment: uptime, error rates, backup schedule and rollback readiness — so you always know the platform is healthy.',
+    points: ['Uptime and error-rate monitoring', 'Backup schedule and restore drills', 'Deployment history with one-click rollback'],
+  },
+};
+
+export function ComingSoonPage({ featureKey }: { featureKey: string }) {
+  const feature = COMING_SOON_FEATURES[featureKey];
+  if (!feature) return <ModulePage title="Coming soon" eyebrow="Jobryn" description="This capability is on the roadmap. The details will appear here once it is scheduled." status="Coming soon"/>;
+  return <Page title={feature.title} eyebrow={feature.eyebrow} description={feature.description}><Card className="p-7"><div className="flex items-start justify-between gap-4"><div><h2 className="text-xl font-bold">Coming soon</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">This capability is planned for the near future — the interface below shows exactly how it will work when it ships. Nothing here is live yet, and no controls pretend to work.</p></div><FeatureStatus state="soon"/></div><div className="mt-6 space-y-2">{feature.points.map((point,index)=><div key={index} className="flex items-start gap-3 rounded-xl border border-slate-100 bg-slate-50/70 p-3 text-sm leading-6 text-slate-700"><span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-white text-[10px] font-black text-slate-500 shadow-sm">{index+1}</span>{point}</div>)}</div><div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">This page is a design commitment, not a working feature. When it ships, it will use the same layout, components and data connections as the rest of Jobryn — so activating it means connecting real data, not redesigning the interface.</div></Card></Page>;
+}
+
 
 export function ModulePage({title,eyebrow,description,status='Backend schema ready'}:{title:string;eyebrow:string;description:string;status?:string}) { return <Page title={title} eyebrow={eyebrow}><Card className="p-7"><div className="flex items-start justify-between gap-4"><div><h3 className="text-xl font-bold">{title}</h3><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{description}</p></div><StatusPill tone="amber">{status}</StatusPill></div><div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">This screen does not fake external actions. It stays visibly limited until the required provider, worker or controlled Operator tool is connected and tested.</div></Card></Page> }
 
