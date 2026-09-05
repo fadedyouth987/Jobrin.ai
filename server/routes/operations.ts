@@ -224,7 +224,7 @@ router.post('/jobs/:id/photos', requireRole('owner', 'admin', 'manager', 'staff'
   const path = `${req.workspaceId}/${req.params.id}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
   const { error: uploadError } = await supabaseAdmin.storage.from('vantory-assets').upload(path, buffer, { contentType: req.body.mime_type });
   if (uploadError) return res.status(500).json({ error: 'UPLOAD_FAILED', message: uploadError.message });
-  await writeAudit(req, 'job.photo.uploaded', 'job', req.params.id, { fileName: req.body.file_name });
+  await writeAudit(req, 'job.photo.uploaded', 'job', String(req.params.id), { fileName: req.body.file_name });
   res.status(201).json({ ok: true, path });
 }));
 
@@ -245,7 +245,7 @@ router.delete('/jobs/:id/photos/:photoName', requireRole('owner', 'admin', 'mana
   const path = `${req.workspaceId}/${req.params.id}/${req.params.photoName}`;
   const { error } = await supabaseAdmin.storage.from('vantory-assets').remove([path]);
   if (error) return res.status(500).json({ error: 'PHOTO_DELETE_FAILED' });
-  await writeAudit(req, 'job.photo.deleted', 'job', req.params.id, { photo: req.params.photoName }, 'warning');
+  await writeAudit(req, 'job.photo.deleted', 'job', String(req.params.id), { photo: req.params.photoName }, 'warning');
   res.json({ ok: true });
 }));
 
