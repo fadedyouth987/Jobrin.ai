@@ -37,6 +37,9 @@
   "env": {
     "staging": {
       "name": "jobryn-staging",
+      "durable_objects": {
+        "bindings": [{ "name": "RECEPTIONIST_CALL", "class_name": "ReceptionistCallDO" }]
+      },
       "vars": {
         "CLOUDFLARE_WORKER": "true",
         "NODE_ENV": "test",
