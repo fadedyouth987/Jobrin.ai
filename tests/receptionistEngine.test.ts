@@ -45,16 +45,23 @@ test('the system prompt always carries the safety guardrails and only approved f
 });
 
 test('without an AI key the session fails safe to a message-take flow', async () => {
-  const session = new ReceptionistSession({ workspaceId: context.workspaceId, callSid: 'CA-test' });
-  session.context = context;
-  session.systemPrompt = buildSystemPrompt(context);
-  const first = await session.handleUserText('Do you fix burst pipes in Adelaide?');
-  assert.equal(first.configured, false);
-  assert.match(first.reply, /take a message/i);
-  assert.equal(first.messageTaken, false);
-  const second = await session.handleUserText('Yes please, call me on 0412 345 678 about the leak');
-  assert.equal(second.messageTaken, true);
-  assert.match(second.reply, /passed that to the team|passed your message/i);
+  const { env } = await import('../server/env');
+  const originalKey = env.OPENAI_API_KEY;
+  env.OPENAI_API_KEY = ''; // simulate the key being absent
+  try {
+    const session = new ReceptionistSession({ workspaceId: context.workspaceId, callSid: 'CA-test' });
+    session.context = context;
+    session.systemPrompt = buildSystemPrompt(context);
+    const first = await session.handleUserText('Do you fix burst pipes in Adelaide?');
+    assert.equal(first.configured, false);
+    assert.match(first.reply, /take a message/i);
+    assert.equal(first.messageTaken, false);
+    const second = await session.handleUserText('Yes please, call me on 0412 345 678 about the leak');
+    assert.equal(second.messageTaken, true);
+    assert.match(second.reply, /passed that to the team|passed your message/i);
+  } finally {
+    env.OPENAI_API_KEY = originalKey;
+  }
 });
 
 test('the engine is attached in both runtimes and the voice webhook signs call tokens', () => {

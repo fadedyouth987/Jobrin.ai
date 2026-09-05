@@ -47,7 +47,8 @@ async function upgradeConversation(request: Request, ctx: ExecutionContext): Pro
     addEventListener: (type: string, listener: (event: MessageEvent | CloseEvent) => void) => void;
   };
   server.accept();
-  const session = new ReceptionistSession({ workspaceId: auth.workspaceId, callSid: auth.callSid });
+  // HARD RULE: phone calls are always served in receptionist mode.
+  const session = new ReceptionistSession({ workspaceId: auth.workspaceId, callSid: auth.callSid, mode: 'receptionist' });
   server.addEventListener('message', (event) => {
     void (async () => {
       let parsed: { type?: string; voicePrompt?: string; customParameters?: Record<string, string> };

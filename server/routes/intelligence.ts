@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncRoute, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest, writeAudit } from '../supabase';
-import { operatorTools } from '../ai/toolRegistry';
+import { operatorTools, toolByName } from '../ai/toolRegistry';
 
 const router = Router();
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('ai.basic'));
@@ -66,7 +66,9 @@ router.get('/ai-actions', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const { data, error } = await db.from('ai_actions').select('id,tool_name,risk_level,status,approval_required,error_code,cost_microunits,created_at,completed_at,customer_id,conversation_id').eq('workspace_id', req.workspaceId!).order('created_at',{ascending:false}).limit(300);
   if (error) return res.status(500).json({ error: 'AI_ACTION_LIST_FAILED' });
-  res.json({ actions: data ?? [] });
+  // Tag each action with the department (specialist) that owns its tool.
+  const actions = (data ?? []).map((row: any) => ({ ...row, specialist: toolByName(row.tool_name)?.specialist ?? null }));
+  res.json({ actions });
 }));
 
 router.get('/capabilities', asyncRoute(async (_req: AuthenticatedRequest, res) => {

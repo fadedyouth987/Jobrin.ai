@@ -59,7 +59,8 @@ export function attachReceptionistWebSocket(server: HttpServer) {
       return;
     }
     wss.handleUpgrade(request, socket, head, (ws) => {
-      const session = new ReceptionistSession({ workspaceId: auth.workspaceId, callSid: auth.callSid });
+      // HARD RULE: phone calls are always served in receptionist mode.
+      const session = new ReceptionistSession({ workspaceId: auth.workspaceId, callSid: auth.callSid, mode: 'receptionist' });
       runSession(ws, session);
     });
   });

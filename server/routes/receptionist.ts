@@ -2,7 +2,7 @@ import { Router } from 'express';
 import twilio from 'twilio';
 import { z } from 'zod';
 import { env } from '../env';
-import { issueCallToken, isReceptionistEngineAttached, simulateReceptionistTurn } from '../ai/receptionistCall';
+import { issueCallToken, isReceptionistEngineAttached, simulateAdminTurn } from '../ai/receptionistCall';
 import { normalizeE164, twilioConfigured } from '../providers/twilio';
 import { asyncRoute, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireSensitiveAuth, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
@@ -71,12 +71,13 @@ router.put('/', requireRole('owner','admin'), requireSensitiveAuth, validateBody
 const simulateSchema = z.object({
   message: z.string().trim().min(1).max(1000),
   history: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().min(1).max(1000) })).max(16).default([]),
+  mode: z.enum(['receptionist', 'finance', 'sales', 'marketing', 'support']).default('receptionist'),
 }).strict();
 
 // Text-mode preview of the exact engine a phone call uses. Owner/admin/manager
 // only; never sends anything and never touches the phone network.
 router.post('/simulate', requireRole('owner', 'admin', 'manager'), validateBody(simulateSchema), asyncRoute(async (req: AuthenticatedRequest, res) => {
-  const result = await simulateReceptionistTurn(req.workspaceId!, req.body.message, req.body.history);
+  const result = await simulateAdminTurn(req.workspaceId!, req.body.message, req.body.history, null, req.body.mode);
   await writeAudit(req, 'receptionist.simulated', 'receptionist_profile', req.workspaceId!, { configured: result.configured, messageTaken: result.messageTaken });
   res.json(result);
 }));
