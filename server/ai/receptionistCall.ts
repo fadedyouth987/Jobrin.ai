@@ -367,7 +367,13 @@ export class ReceptionistSession {
       ...this.history.slice(-16).map((entry) => ({ role: entry.role, content: entry.content })),
       { role: 'user', content: userText },
     ];
-    const first = await openaiChat(messages, toolsForMode(this.mode));
+    let first;
+    try {
+      first = await openaiChat(messages, toolsForMode(this.mode));
+    } catch {
+      // Provider failure (rate limit, network): fail safe to message-take.
+      first = { configured: false, message: null };
+    }
     if (!first.configured) {
       this.pendingMessageTake = true;
       const reply = `I'm sorry, I can't answer questions at the moment, but I can take a message for the team — what is the best number to reach you on?`;
@@ -385,7 +391,12 @@ export class ReceptionistSession {
         this.messageTaken = true;
         messages.push(assistantMessage as never);
         messages.push({ role: 'tool', tool_call_id: call.id, content: `Message recorded for the team. Confirm to the caller in one short sentence.` });
-        const second = await openaiChat(messages, toolsForMode(this.mode));
+        let second;
+        try {
+          second = await openaiChat(messages, toolsForMode(this.mode));
+        } catch {
+          second = { configured: false, message: null };
+        }
         const reply = second.configured && second.message?.content ? second.message.content : `Thank you — I've passed your message to the team and they'll be in touch.`;
         this.history.push({ role: 'user', content: userText }, { role: 'assistant', content: reply });
         this.pushTranscript('receptionist', reply);

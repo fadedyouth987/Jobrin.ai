@@ -66,19 +66,21 @@ router.get('/jobs/:id', asyncRoute(async (req: AuthenticatedRequest, res) => {
     .eq('workspace_id', workspaceId).eq('id', req.params.id).maybeSingle();
   if (jobError) return res.status(500).json({ error: 'JOB_READ_FAILED' });
   if (!job) return res.status(404).json({ error: 'JOB_NOT_FOUND' });
-  const [appointments, quotes, invoices] = await Promise.all([
+  const [appointments, quotes, invoices, timeEntries, materials] = await Promise.all([
     db.from('appointments').select('id,title,status,starts_at,ends_at,address_text,assigned_user_id').eq('workspace_id', workspaceId).eq('job_id', job.id).order('starts_at'),
+    db.from('job_time_entries').select('id,user_id,started_at,ended_at,break_minutes,notes').eq('workspace_id', workspaceId).eq('job_id', job.id).order('started_at'),
+    db.from('job_materials').select('id,description,supplier,quantity,unit_cost_cents,unit_price_cents,supplier_reference,created_at').eq('workspace_id', workspaceId).eq('job_id', job.id).order('created_at'),
     db.from('quotes').select('id,quote_number,status,total_cents,expires_at,created_at').eq('workspace_id', workspaceId).eq('job_id', job.id).order('created_at', { ascending: false }),
     db.from('invoices').select('id,invoice_number,status,total_cents,balance_due_cents,due_at,created_at').eq('workspace_id', workspaceId).eq('job_id', job.id).order('created_at', { ascending: false }),
   ]);
-  const relatedError = [appointments.error, quotes.error, invoices.error].find(Boolean);
+  const relatedError = [appointments.error, quotes.error, invoices.error, timeEntries.error, materials.error].find(Boolean);
   if (relatedError) return res.status(500).json({ error: 'JOB_RELATED_READ_FAILED' });
   const invoiceIds = (invoices.data ?? []).map((invoice: any) => invoice.id);
   const payments = invoiceIds.length
     ? await db.from('payments').select('id,status,amount_cents,paid_at,invoice_id,created_at').eq('workspace_id', workspaceId).in('invoice_id', invoiceIds).order('created_at', { ascending: false })
     : { data: [], error: null };
   if (payments.error) return res.status(500).json({ error: 'JOB_PAYMENT_READ_FAILED' });
-  res.json({ job, appointments: appointments.data ?? [], quotes: quotes.data ?? [], invoices: invoices.data ?? [], payments: payments.data ?? [] });
+  res.json({ job, appointments: appointments.data ?? [], quotes: quotes.data ?? [], invoices: invoices.data ?? [], payments: payments.data ?? [], time_entries: timeEntries.data ?? [], materials: materials.data ?? [] });
 }));
 
 router.post('/jobs', requireRole('owner','admin','manager','staff'), validateBody(z.object({
@@ -124,6 +126,83 @@ router.patch('/jobs/:id/schedule', requireRole('owner','admin','manager','staff'
   if (error) return res.status(400).json({ error: 'JOB_SCHEDULE_FAILED' });
   await writeAudit(req, 'job.scheduled', 'job', data.id, { scheduled_start: data.scheduled_start, scheduled_end: data.scheduled_end, assigned_user_id: data.assigned_user_id });
   res.json({ job: data });
+}));
+
+// Time tracking: technicians log their own hours; a running entry has no
+// ended_at. Only the entry owner (or managers+) may stop it.
+router.post('/jobs/:id/time', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(z.object({
+  started_at: z.string().datetime(),
+  ended_at: z.string().datetime().nullable().optional(),
+  break_minutes: z.number().int().min(0).max(480).default(0),
+  notes: z.string().trim().max(1000).default(''),
+})), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data: job, error: jobError } = await db.from('jobs').select('id').eq('workspace_id', req.workspaceId!).eq('id', req.params.id).maybeSingle();
+  if (jobError) return res.status(500).json({ error: 'JOB_READ_FAILED' });
+  if (!job) return res.status(404).json({ error: 'JOB_NOT_FOUND' });
+  const startedAt = new Date(req.body.started_at);
+  if (Number.isNaN(startedAt.getTime())) return res.status(400).json({ error: 'INVALID_TIME_RANGE' });
+  let endedAt: Date | null = req.body.ended_at ? new Date(req.body.ended_at) : null;
+  if (endedAt !== null && (Number.isNaN(endedAt.getTime()) || endedAt.getTime() <= startedAt.getTime())) return res.status(400).json({ error: 'INVALID_TIME_RANGE' });
+  const { data: entry, error } = await db.from('job_time_entries').insert({
+    workspace_id: req.workspaceId!, job_id: job.id, user_id: req.auth!.userId,
+    started_at: startedAt.toISOString(), ended_at: endedAt ? endedAt.toISOString() : null,
+    break_minutes: req.body.break_minutes, notes: req.body.notes,
+  }).select('id,user_id,started_at,ended_at,break_minutes,notes').single();
+  if (error) return res.status(400).json({ error: 'TIME_ENTRY_CREATE_FAILED', message: error.message });
+  await writeAudit(req, 'job.time.logged', 'job_time_entry', entry.id);
+  res.status(201).json({ entry });
+}));
+
+router.patch('/jobs/:id/time/:entryId', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(z.object({
+  ended_at: z.string().datetime(),
+})), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data: entry, error: readError } = await db.from('job_time_entries').select('id,user_id,started_at').eq('workspace_id', req.workspaceId!).eq('id', req.params.entryId).maybeSingle();
+  if (readError) return res.status(500).json({ error: 'TIME_ENTRY_READ_FAILED' });
+  if (!entry) return res.status(404).json({ error: 'TIME_ENTRY_NOT_FOUND' });
+  const isElevated = ['owner', 'admin', 'manager'].includes(req.workspaceRole || '');
+  if (!isElevated && entry.user_id !== req.auth!.userId) return res.status(403).json({ error: 'INSUFFICIENT_ROLE' });
+  const endedAt = new Date(req.body.ended_at);
+  if (Number.isNaN(endedAt.getTime()) || endedAt.getTime() <= new Date(entry.started_at).getTime()) return res.status(400).json({ error: 'INVALID_TIME_RANGE' });
+  const { data, error } = await db.from('job_time_entries').update({ ended_at: endedAt.toISOString() })
+    .eq('workspace_id', req.workspaceId!).eq('id', req.params.entryId).select('id,started_at,ended_at,break_minutes,notes').single();
+  if (error || !data) return res.status(400).json({ error: 'TIME_ENTRY_UPDATE_FAILED' });
+  await writeAudit(req, 'job.time.stopped', 'job_time_entry', data.id);
+  res.json({ entry: data });
+}));
+
+router.post('/jobs/:id/materials', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(z.object({
+  description: z.string().trim().min(2).max(300),
+  supplier: z.string().trim().max(160).nullable().optional(),
+  quantity: z.number().positive().max(100_000),
+  unit_cost_cents: z.number().int().min(0).max(100_000_000).default(0),
+  unit_price_cents: z.number().int().min(0).max(100_000_000).default(0),
+  supplier_reference: z.string().trim().max(160).nullable().optional(),
+})), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data: job, error: jobError } = await db.from('jobs').select('id').eq('workspace_id', req.workspaceId!).eq('id', req.params.id).maybeSingle();
+  if (jobError) return res.status(500).json({ error: 'JOB_READ_FAILED' });
+  if (!job) return res.status(404).json({ error: 'JOB_NOT_FOUND' });
+  const { data: material, error } = await db.from('job_materials').insert({
+    workspace_id: req.workspaceId!, job_id: job.id, description: req.body.description,
+    supplier: req.body.supplier || null, quantity: req.body.quantity,
+    unit_cost_cents: req.body.unit_cost_cents, unit_price_cents: req.body.unit_price_cents,
+    supplier_reference: req.body.supplier_reference || null,
+  }).select('id,description,quantity,unit_cost_cents,unit_price_cents,supplier').single();
+  if (error) return res.status(400).json({ error: 'MATERIAL_CREATE_FAILED', message: error.message });
+  await writeAudit(req, 'job.materials.added', 'job_material', material.id, { description: req.body.description });
+  res.status(201).json({ material });
+}));
+
+router.delete('/jobs/:id/materials/:materialId', requireRole('owner', 'admin', 'manager'), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  // No delete grant for browser clients - trusted server-side correction only.
+  const { data, error } = await supabaseAdmin.from('job_materials').delete()
+    .eq('workspace_id', req.workspaceId!).eq('job_id', req.params.id).eq('id', req.params.materialId).select('id').maybeSingle();
+  if (error) return res.status(500).json({ error: 'MATERIAL_DELETE_FAILED' });
+  if (!data) return res.status(404).json({ error: 'MATERIAL_NOT_FOUND' });
+  await writeAudit(req, 'job.materials.removed', 'job_material', String(req.params.materialId), {}, 'warning');
+  res.json({ ok: true });
 }));
 
 export const jobStatusTransitions: Record<string, string[]> = {
