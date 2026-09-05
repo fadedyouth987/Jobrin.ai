@@ -19,6 +19,7 @@ import { HiringPage } from './HiringPage';
 import { CustomerDetailPage, JobDetailPage } from './OperationalDetailPages';
 import { SchedulePage } from './SchedulePage';
 import { BusinessBrainPage } from './BusinessBrainPage';
+import { AssetsPage } from './AssetsPage';
 import { useTheme } from '../app/theme';
 
 type NavItem = [string, string, React.ComponentType<{ className?: string }>, boolean?];
@@ -54,7 +55,7 @@ const groups: NavGroup[] = [
   { label:'Field Operations', items:[
     ['/app/coming-soon/time-materials','Time & Materials log',Clock3,true],
     ['/app/coming-soon/checklists-forms','Checklists & forms',ClipboardList,true],
-    ['/app/coming-soon/customer-assets','Assets & service history',Package,true],
+    ['/app/assets','Assets & service history',Package],
     ['/app/coming-soon/recurring-jobs','Recurring jobs & agreements',Repeat,true],
     ['/app/coming-soon/supplier-purchasing','Supplier purchasing',Package,true],
   ]},
@@ -177,6 +178,7 @@ function routePage(path:string) {
   if(path==='/app/command')return <CommandCentrePage/>;
   if(path==='/app/inbox')return <InboxPage/>;
   if(path==='/app/notifications')return <NotificationsPage/>;
+  if(path==='/app/assets')return <AssetsPage/>;
   if(path==='/app/capabilities')return <CapabilityMapPage/>;
   if(path==='/app/marketing')return <MarketingPage/>;
   if(path==='/app/hiring')return <HiringPage/>;
