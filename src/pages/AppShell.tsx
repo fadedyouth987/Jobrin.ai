@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Activity, BarChart3, Bell, Bot, Brain, BriefcaseBusiness, Calculator, CalendarDays, ChevronDown,
   CircleDollarSign, ClipboardList, Clock3, ContactRound, CreditCard, FileCheck2, FileText, Globe,
-  Home, Inbox, KeyRound, LibraryBig, LogOut, MapPin, Menu, MessageSquareMore, Package, Phone,
+  Home, Inbox, KeyRound, LibraryBig, LogOut, MapPin, Menu, Moon, MessageSquareMore, Package, Phone,
   PhoneCall, PlugZap, ReceiptText, Repeat, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Star, Sun,
   UserRoundPlus, Users, Voicemail, Workflow, X
 } from 'lucide-react';
@@ -114,7 +114,8 @@ function CommandPalette({ items, onClose }: { items: NavItem[]; onClose: () => v
 }
 
 export default function AppShell() {
-  const auth=useAuth(); const path=usePathname(); const [mobile,setMobile]=useState(false); const [subscriptionChecked,setSubscriptionChecked]=useState(false); const [paletteOpen,setPaletteOpen]=useState(false); const [unreadCount,setUnreadCount]=useState<number|null>(null);
+  const auth=useAuth(); const path=usePathname(); const [mobile,setMobile]=useState(false); const [subscriptionChecked,setSubscriptionChecked]=useState(false); const [paletteOpen,setPaletteOpen]=useState(false); const [unreadCount,setUnreadCount]=useState<number|null>(null); const {theme,setTheme}=useTheme();
+  const cycleTheme=()=>setTheme(theme==='light'?'dark':theme==='dark'?'system':'light');
   useEffect(()=>{
     if(auth.loading)return;
     if(!auth.session){navigate('/login',true);return;}

@@ -3,13 +3,13 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
-  Dark mode strategy: the whole slate scale and white invert inside .dark, so
-  every existing bg-white / bg-slate-50 / text-slate-950 class flips
-  automatically. Accents (indigo, emerald) keep their hues but shift to
-  darker-surface variants for contrast.
+  Dark mode strategy: invert the slate scale via CSS variables for borders,
+  secondary text and backgrounds. For dual-use values (white, slate-50,
+  slate-950), add per-utility overrides so bg-* and text-* flip independently:
+  bg-white surfaces go dark, text-white stays white on colored buttons,
+  bg-slate-950 dark sections stay dark, text-slate-950 becomes light on cards.
 */
 .dark {
-  --color-white: oklch(0.145 0.005 285);
   --color-slate-50: oklch(0.17 0.005 285);
   --color-slate-100: oklch(0.21 0.006 285);
   --color-slate-200: oklch(0.28 0.008 285);
@@ -18,7 +18,21 @@
   --color-slate-500: oklch(0.72 0.012 285);
   --color-slate-600: oklch(0.78 0.01 285);
   --color-slate-700: oklch(0.84 0.008 285);
-  --color-slate-800: oklch(0.9 0.006 285);
-  --color-slate-900: oklch(0.95 0.004 285);
+  --color-slate-800: oklch(0.92 0.006 285);
+  --color-slate-900: oklch(0.96 0.004 285);
   --color-slate-950: oklch(0.98 0.002 285);
 }
+
+.dark .bg-white { background-color: oklch(0.145 0.005 285); }
+.dark .bg-slate-50 { background-color: oklch(0.17 0.005 285); }
+.dark .bg-slate-100 { background-color: oklch(0.21 0.006 285); }
+.dark .bg-slate-200 { background-color: oklch(0.28 0.008 285); }
+.dark .bg-slate-950 { background-color: oklch(0.08 0.003 285); }
+.dark .text-white { color: oklch(0.98 0.002 285); }
+.dark .text-slate-950 { color: oklch(0.96 0.004 285); }
+.dark .text-slate-900 { color: oklch(0.93 0.005 285); }
+.dark .hover\:bg-slate-100:hover { background-color: oklch(0.24 0.006 285); }
+.dark .hover\:bg-slate-50:hover { background-color: oklch(0.2 0.005 285); }
+.dark .border-slate-200 { border-color: oklch(0.3 0.008 285); }
+.dark .border-slate-100 { border-color: oklch(0.24 0.006 285); }
+.dark .border-slate-200\/80 { border-color: oklch(0.3 0.008 285 / 0.8); }
