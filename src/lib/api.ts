@@ -42,6 +42,6 @@ export async function apiFetch<T = any>(path: string, init: RequestInit = {}, wo
   return payload as T;
 }
 
-export async function jobrynFetch<T = any>(path: string, workspaceId: string, init: RequestInit = {}): Promise<T> {
+export async function jobrinAiFetch<T = any>(path: string, workspaceId: string, init: RequestInit = {}): Promise<T> {
   return apiFetch<T>(path, init, workspaceId);
 }

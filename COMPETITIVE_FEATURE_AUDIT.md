@@ -1,4 +1,4 @@
-# Jobryn competitive feature audit — 5 September 2026
+# Jobrin.ai competitive feature audit — 5 September 2026
 
 Sources: public feature pages and 2026 comparison articles for ServiceM8 (14),
 Housecall Pro (CSR AI), Workiz (Genius AI), Jobber, Tradify, AroFlo, Fergus,
@@ -15,7 +15,7 @@ simPRO, QuoteIQ, FieldFrame, BuildFolio, FieldQuote, Fixlify, Trady, Tradeify.
 | AI writing | ServiceM8 AI email writing, AI invoice generator | Drafts customer-facing emails/SMS and invoices |
 | Smart scheduling | ServiceM8 smart scheduling suggestions, Workiz smart dispatch | Suggests/optimises schedules, self-serve rescheduling |
 
-## Where Jobryn already matches or leads
+## Where Jobrin.ai already matches or leads
 
 - Signed real-time AI receptionist engine (built and verified in this repo) —
   the same category as ServiceM8 Phone Agent / HCP CSR AI, but tenant-isolated
@@ -33,7 +33,7 @@ simPRO, QuoteIQ, FieldFrame, BuildFolio, FieldQuote, Fixlify, Trady, Tradeify.
    invoices, then public quote accept (built), then invoice payment link
    (built, needs Stripe keys). Competitors make this one tap.
 2. **Photo → quote / voice → quote** (QuoteIQ/FieldFrame/FieldQuote): the
-   single most-marketed AI feature of 2026. Jobryn has the schema (services,
+   single most-marketed AI feature of 2026. Jobrin.ai has the schema (services,
    quote_items) and the storage bucket; add photos + voice-note transcription
    to quote drafts, AI-assisted line items, always owner-approved before send.
 3. **Public booking page** (Tradeify, Workiz self-serve): customer-facing
@@ -61,7 +61,7 @@ simPRO, QuoteIQ, FieldFrame, BuildFolio, FieldQuote, Fixlify, Trady, Tradeify.
 
 **Tier 3 — the "not being explained" fix (product surface)**
 
-13. In-app capability map: a "What Jobryn can do" tour page listing every
+13. In-app capability map: a "What Jobrin.ai can do" tour page listing every
     automated capability with its on/off state — the meta-fix for features
     not being discoverable.
 14. Notification centre (notifications table exists, unused): owner alerts for
@@ -70,9 +70,9 @@ simPRO, QuoteIQ, FieldFrame, BuildFolio, FieldQuote, Fixlify, Trady, Tradeify.
 ## Notes
 
 - Competitors sell phone AI separately (HCP CSR AI is an add-on; AgentZap
-  charges US$109/mo). Jobryn's included receptionist is a genuine differentiator
+  charges US$109/mo). Jobrin.ai's included receptionist is a genuine differentiator
   once live — but HCP/Workiz go further: booking during the call and
-  dispatching. Jobryn's allow_booking needs availability wiring to match.
+  dispatching. Jobrin.ai's allow_booking needs availability wiring to match.
 - Financing buttons ("See monthly payments") are a US pattern; in Australia,
   deposit requests + Stripe-hosted instalments are the closer fit (deposit
   fields already exist on quotes).

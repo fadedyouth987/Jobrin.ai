@@ -1,6 +1,6 @@
-# Run Jobryn on Windows (PowerShell)
+# Run Jobrin.ai on Windows (PowerShell)
 
-Open PowerShell in the extracted Jobryn folder.
+Open PowerShell in the extracted Jobrin.ai folder.
 
 ## 1. Check Node/npm
 
@@ -81,7 +81,7 @@ npm.cmd run security:check
 npm.cmd run typecheck
 ```
 
-## 8. Start Jobryn
+## 8. Start Jobrin.ai
 
 ```powershell
 npm.cmd run dev

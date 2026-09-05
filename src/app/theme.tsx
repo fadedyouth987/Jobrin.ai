@@ -4,7 +4,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 // defaults to the device preference until the user picks one. The `.dark`
 // class on <html> drives the CSS-variable overrides in index.css.
 type Theme = 'light' | 'dark' | 'system';
-const KEY = 'jobryn.theme';
+const KEY = 'jobrin-ai.theme';
 
 const ThemeContext = createContext<{ theme: Theme; setTheme: (t: Theme) => void }>({ theme: 'system', setTheme: () => undefined });
 

@@ -32,8 +32,8 @@ test('Stripe webhooks verify signatures against the raw body before claiming eve
 test('Checkout uses dynamic payment methods and current integration identifiers', () => {
   assert.doesNotMatch(billingSource, /payment_method_types/);
   assert.doesNotMatch(operationsSource, /payment_method_types/);
-  assert.match(billingSource, /integration_identifier: 'jobryn_subs_[a-z]{8}'/);
-  assert.match(operationsSource, /integration_identifier:'jobryn_pay_[a-z]{8}'/);
+  assert.match(billingSource, /integration_identifier: 'jobrin-ai_subs_[a-z]{8}'/);
+  assert.match(operationsSource, /integration_identifier:'jobrin-ai_pay_[a-z]{8}'/);
 });
 
 test('invoice settlement is restricted to the service role and is idempotent', () => {

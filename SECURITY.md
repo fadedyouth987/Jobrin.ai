@@ -1,4 +1,4 @@
-# Security Policy — Jobryn
+# Security Policy — Jobrin.ai
 
 ## Secrets
 
@@ -14,7 +14,7 @@ Do not trust workspace IDs, roles, plan names, prices or resource ownership sent
 
 ## Payments
 
-Jobryn subscription card collection uses Stripe-hosted Checkout. Billing management uses Stripe Billing Portal. Stripe webhook signatures must be verified using the original raw request body. Financial state changes must be idempotent and transaction-safe.
+Jobrin.ai subscription card collection uses Stripe-hosted Checkout. Billing management uses Stripe Billing Portal. Stripe webhook signatures must be verified using the original raw request body. Financial state changes must be idempotent and transaction-safe.
 
 ## AI
 

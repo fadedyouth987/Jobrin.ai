@@ -43,7 +43,7 @@ router.post('/appointments', requireRole('owner','admin','manager','staff'), val
     if (conflictError) return res.status(500).json({ error: 'AVAILABILITY_CHECK_FAILED' });
     if (conflict?.length) return res.status(409).json({ error: 'BOOKING_CONFLICT' });
   }
-  const { data, error } = await db.from('appointments').insert({ ...req.body, workspace_id: req.workspaceId!, status: 'scheduled', source: 'jobryn' }).select('*').single();
+  const { data, error } = await db.from('appointments').insert({ ...req.body, workspace_id: req.workspaceId!, status: 'scheduled', source: 'jobrin-ai' }).select('*').single();
   if (error) return res.status(400).json({ error: 'APPOINTMENT_CREATE_FAILED', message: error.message });
   await writeAudit(req, 'appointment.created', 'appointment', data.id);
   res.status(201).json({ appointment: data });
@@ -619,14 +619,14 @@ router.post('/invoices/:id/checkout', requireRole('owner','admin','manager'), re
   if(!Number.isSafeInteger(amount)||amount<=0)return res.status(409).json({error:'INVALID_INVOICE_BALANCE'});
   const session=await stripe.checkout.sessions.create({
     mode:'payment',
-    line_items:[{price_data:{currency:'aud',product_data:{name:`Jobryn invoice #${invoice.invoice_number}`,description:'Secure invoice payment'},unit_amount:amount},quantity:1}],
+    line_items:[{price_data:{currency:'aud',product_data:{name:`Jobrin.ai invoice #${invoice.invoice_number}`,description:'Secure invoice payment'},unit_amount:amount},quantity:1}],
     customer_email:customer?.email||undefined,
     client_reference_id:invoice.id,
     metadata:{workspace_id:req.workspaceId!,invoice_id:invoice.id,customer_id:invoice.customer_id,amount_cents:String(amount)},
     payment_intent_data:{metadata:{workspace_id:req.workspaceId!,invoice_id:invoice.id,customer_id:invoice.customer_id}},
     success_url:`${env.APP_URL}/payment-complete?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url:`${env.APP_URL}/payment-cancelled`,
-    integration_identifier:'jobryn_pay_fhwktzpn',
+    integration_identifier:'jobrin-ai_pay_fhwktzpn',
   // A deterministic Stripe key returns the same live session for this invoice
   // balance, preventing two payment links from charging the same balance.
   },{idempotencyKey:`invoice-checkout:${req.workspaceId}:${invoice.id}:${amount}`});

@@ -1,6 +1,6 @@
 // Cache only immutable build assets. Never cache documents or URLs containing
 // auth, recovery, checkout or other one-time tokens.
-const CACHE='jobryn-static-v2';
+const CACHE='jobrin-ai-static-v2';
 const ASSET_DESTINATIONS=new Set(['style','script','image','font','manifest']);
 self.addEventListener('install',event=>event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));

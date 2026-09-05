@@ -61,7 +61,7 @@ const coreSecrets = ['SUPABASE_SERVICE_ROLE_KEY', 'STRIPE_SECRET_KEY', 'STRIPE_W
 const missingCore = coreSecrets.filter((name) => !env[name]);
 if (missingCore.length) info(`Production deploy gate: ${missingCore.join(', ')} still required (boot fails closed by design)`);
 
-console.log('Jobryn setup self-check\n');
+console.log('Jobrin.ai setup self-check\n');
 lines.forEach((line) => console.log(line));
 const todoCount = lines.filter((l) => l.startsWith('[todo]')).length;
 console.log(`\n${lines.filter((l) => l.startsWith('[ok]')).length} configured, ${todoCount} to do, ${lines.filter((l) => l.startsWith('[info]')).length} manual steps`);

@@ -1,8 +1,8 @@
-# Jobryn Foundation Status — v0.1
+# Jobrin.ai Foundation Status — v0.1
 
 ## Completed in this foundation pass
 
-- Canonical product/package renamed to Jobryn.
+- Canonical product/package renamed to Jobrin.ai.
 - Firebase client and Firestore service removed from the active codebase.
 - Supabase browser auth client added for email/password, Google OAuth, reset and sign-out.
 - Supabase server helpers added for bearer-token authentication and workspace membership enforcement.

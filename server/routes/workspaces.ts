@@ -29,7 +29,7 @@ router.post('/', requireAuth, validateBody(z.object({
 })), asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const base = slugify(req.body.slug || req.body.name);
-  const slug = base.length >= 3 ? base : `${base || 'jobryn'}-${Math.random().toString(36).slice(2, 7)}`;
+  const slug = base.length >= 3 ? base : `${base || 'jobrin-ai'}-${Math.random().toString(36).slice(2, 7)}`;
   const { data, error } = await db.rpc('create_workspace', { workspace_name: req.body.name, workspace_slug: slug });
   if (error) {
     if (/duplicate|unique/i.test(error.message)) return res.status(409).json({ error: 'WORKSPACE_SLUG_TAKEN' });

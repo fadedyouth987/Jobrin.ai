@@ -16,9 +16,9 @@ export const supabase = createClient(url || 'http://127.0.0.1:54321', anonKey ||
   },
 });
 
-export type JobrynOAuthProvider = 'google' | 'github' | 'azure' | 'apple';
+export type JobrinAiOAuthProvider = 'google' | 'github' | 'azure' | 'apple';
 
-export async function signInWithProvider(provider: JobrynOAuthProvider) {
+export async function signInWithProvider(provider: JobrinAiOAuthProvider) {
   const scopes = provider === 'azure' ? 'email openid profile' : undefined;
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,

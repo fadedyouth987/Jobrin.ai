@@ -1,12 +1,12 @@
-# Jobryn
+# Jobrin.ai
 
 **Operations platform for Australian trade and service businesses.**
 
-Jobryn is a subscription SaaS foundation with secure authentication, workspace tenancy, CRM and field-operations modules, Stripe Billing, controlled customer communications, and an AI-assisted operations foundation.
+Jobrin.ai is a subscription SaaS foundation with secure authentication, workspace tenancy, CRM and field-operations modules, Stripe Billing, controlled customer communications, and an AI-assisted operations foundation.
 
 ## Included application surfaces
 
-- Public Jobryn website and pricing
+- Public Jobrin.ai website and pricing
 - Email/password signup, verification, recovery and login
 - Google, GitHub, Microsoft/Azure and Apple-ready OAuth through Supabase
 - TOTP MFA enrollment/challenge

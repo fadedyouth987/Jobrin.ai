@@ -1,4 +1,4 @@
-# Jobryn billing test setup
+# Jobrin.ai billing test setup
 
 This is a **test-mode only** configuration. Do not copy these values into a
 live environment or create live products until launch review is complete.
@@ -7,12 +7,13 @@ live environment or create live products until launch review is complete.
 
 | App plan | Stripe product | Test Price ID | Monthly price |
 | --- | --- | --- | --- |
-| `starter` | Jobryn Starter | `price_1UBaqSCzRQMl5tFrL3eY5ibJ` | $149 AUD |
-| `growth` | Jobryn Growth | `price_1UBaqhCzRQMl5tFr7UmVZPTR` | $299 AUD |
-| `operator` | Jobryn Operator (inactive) | `price_1UBaqlCzRQMl5tFrKQth36fR` | $599 AUD |
+| `starter` | Jobrin.ai Starter | `price_1UBaqSCzRQMl5tFrL3eY5ibJ` | $149 AUD |
+| `growth` | Jobrin.ai Growth | `price_1UBaqhCzRQMl5tFr7UmVZPTR` | $299 AUD |
+| `operator` | Jobrin.ai Operator (inactive) | `price_1UBaqlCzRQMl5tFrKQth36fR` | $599 AUD |
 
-The founding offer is test code `JOBRYNFOUNDING`: $50 AUD off Jobryn Starter
-for the first three months. It is restricted to ten first-time customers.
+The founding offer is an optional Stripe-configured promotion: $50 AUD off Jobrin.ai Starter
+for the first three months, restricted to ten first-time customers. Use only the
+promotion code configured in the matching Stripe account.
 
 ## Test environment variables
 
@@ -32,7 +33,7 @@ the Operator plan is intentionally activated and its value is validated.
 
 1. Deploy a staging-only Worker with a secret `STRIPE_WEBHOOK_SECRET`.
 2. Create one **test-mode** Stripe webhook to:
-   `https://jobryn-staging.nexgen-studio.workers.dev/api/billing/webhook`
+   `https://jobrin-ai-staging.nexgen-studio.workers.dev/api/billing/webhook`
 3. Subscribe only to events handled by the app:
    - `checkout.session.completed`
    - `customer.subscription.created`
@@ -43,7 +44,7 @@ the Operator plan is intentionally activated and its value is validated.
 4. Use the signing secret Stripe shows once, then run a Checkout test and
    confirm the subscription and entitlement snapshot change in Supabase.
 
-Do not point a test webhook at `jobryn.org`, and do not configure a live
+Do not point a test webhook at `jobrin.ai`, and do not configure a live
 webhook before the staging test passes.
 
 ## Customer Portal checklist
@@ -52,8 +53,8 @@ Create one test-mode Customer Portal configuration in Stripe Dashboard:
 
 - Allow payment method updates.
 - Allow cancellation at the end of the billing period.
-- Allow switching between Jobryn Starter and Jobryn Growth only.
-- Keep Jobryn Operator out of the portal until it is publicly offered.
+- Allow switching between Jobrin.ai Starter and Jobrin.ai Growth only.
+- Keep Jobrin.ai Operator out of the portal until it is publicly offered.
 - Keep promotional-code entry enabled for the founding offer.
 
 ## Tax

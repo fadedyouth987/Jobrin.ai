@@ -108,7 +108,7 @@ stripeWebhookRouter.post('/webhook', express.raw({ type: 'application/json', lim
     target_event_id: event.id,
     target_event_type: event.type,
     // Keep only replay/debug metadata. The full Stripe payload may contain
-    // customer contact or billing details that Jobryn does not need to retain.
+    // customer contact or billing details that Jobrin.ai does not need to retain.
     target_payload: { id:event.id, type:event.type, created:event.created, livemode:event.livemode, api_version:event.api_version },
   });
   if (claimError) return res.status(500).json({ error: 'STRIPE_EVENT_CLAIM_FAILED' });
@@ -258,7 +258,7 @@ router.post('/checkout', requireRole('owner','admin'), requireSensitiveAuth, val
     client_reference_id: req.workspaceId!,
     subscription_data: { metadata: { workspace_id: req.workspaceId!, plan } },
     metadata: { workspace_id: req.workspaceId!, plan },
-    integration_identifier: 'jobryn_subs_qkmvztpa',
+    integration_identifier: 'jobrin-ai_subs_qkmvztpa',
     allow_promotion_codes: true,
     billing_address_collection: 'auto',
   }, { idempotencyKey: `checkout:${req.workspaceId}:${plan}:${providedKey}` });

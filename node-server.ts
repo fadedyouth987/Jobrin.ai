@@ -34,7 +34,7 @@ async function startServer() {
 
   finalizeApp();
   const server = app.listen(env.PORT, '0.0.0.0', () => {
-    console.log(JSON.stringify({ level: 'info', message: 'Jobryn server started', port: env.PORT, environment: env.NODE_ENV }));
+    console.log(JSON.stringify({ level: 'info', message: 'Jobrin.ai server started', port: env.PORT, environment: env.NODE_ENV }));
     if (env.SUPABASE_SERVICE_ROLE_KEY && env.OPENAI_API_KEY) startBusinessBrainWorker();
     if (env.SUPABASE_SERVICE_ROLE_KEY) startAutomationRunner();
   });

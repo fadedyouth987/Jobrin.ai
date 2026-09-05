@@ -72,7 +72,7 @@ router.post('/invites', requireRole('owner', 'admin'), requireSensitiveAuth, val
   });
   if (invite.error) {
     if (/already been registered/i.test(invite.error.message)) {
-      return res.status(409).json({ error: 'EMAIL_ALREADY_REGISTERED', message: 'That email already has a Jobryn login. Ask them to sign in, then add them from this page once account linking is available.' });
+      return res.status(409).json({ error: 'EMAIL_ALREADY_REGISTERED', message: 'That email already has a Jobrin.ai login. Ask them to sign in, then add them from this page once account linking is available.' });
     }
     return res.status(502).json({ error: 'INVITE_SEND_FAILED' });
   }

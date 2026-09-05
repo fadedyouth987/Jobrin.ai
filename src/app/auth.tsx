@@ -27,7 +27,7 @@ type AuthState = {
 };
 
 const AuthContext = createContext<AuthState | null>(null);
-const WORKSPACE_KEY = 'jobryn.active_workspace';
+const WORKSPACE_KEY = 'jobrin-ai.active_workspace';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);

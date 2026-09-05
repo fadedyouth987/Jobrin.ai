@@ -1,6 +1,6 @@
-# Jobryn SaaS — Production Setup
+# Jobrin.ai SaaS — Production Setup
 
-This repository is the secure SaaS foundation for Jobryn. It includes the public website, authenticated application shell, Supabase-backed multi-tenant data model, OAuth/password authentication, MFA UI, Stripe subscription billing, hardened API middleware and normalized CRM, hiring, operations and communications records.
+This repository is the secure SaaS foundation for Jobrin.ai. It includes the public website, authenticated application shell, Supabase-backed multi-tenant data model, OAuth/password authentication, MFA UI, Stripe subscription billing, hardened API middleware and normalized CRM, hiring, operations and communications records.
 
 ## 1. Local prerequisites
 
@@ -61,7 +61,7 @@ In Supabase Authentication:
 - enable email/password
 - require email verification in production
 - configure the production Site URL
-- allow `https://jobryn.org/auth/callback` and `https://jobryn.org/reset-password`
+- allow `https://jobrin.ai/auth/callback` and `https://jobrin.ai/reset-password`
 - enable Google and GitHub as the first OAuth providers
 - optionally enable Azure/Microsoft and Apple
 - configure provider client IDs/secrets in Supabase, never in the browser
@@ -72,11 +72,11 @@ The frontend uses PKCE and exchanges the OAuth code at `/auth/callback`.
 
 ### MFA
 
-Jobryn supports TOTP enrollment under **Settings → Security**. Set `REQUIRE_AAL2_SENSITIVE=true` in production once owner/admin MFA onboarding is ready. Sensitive billing actions are then rejected unless the session has AAL2.
+Jobrin.ai supports TOTP enrollment under **Settings → Security**. Set `REQUIRE_AAL2_SENSITIVE=true` in production once owner/admin MFA onboarding is ready. Sensitive billing actions are then rejected unless the session has AAL2.
 
 ## 3. Stripe Billing
 
-Create three recurring Stripe Prices matching Jobryn's plans:
+Create three recurring Stripe Prices matching Jobrin.ai's plans:
 
 - Starter
 - Growth
@@ -90,12 +90,12 @@ STRIPE_PRICE_GROWTH=price_...
 STRIPE_PRICE_OPERATOR=price_...
 ```
 
-Never accept a Stripe Price ID from the browser. The API accepts a Jobryn plan key and maps it to the trusted server-side Price ID.
+Never accept a Stripe Price ID from the browser. The API accepts a Jobrin.ai plan key and maps it to the trusted server-side Price ID.
 
 Create a Stripe webhook endpoint:
 
 ```text
-https://jobryn.org/api/stripe/webhook
+https://jobrin.ai/api/stripe/webhook
 ```
 
 Subscribe at minimum to:
@@ -109,7 +109,7 @@ Subscribe at minimum to:
 
 Store the signing secret as `STRIPE_WEBHOOK_SECRET`. Webhook signatures are verified against the raw request body before processing. Events are claimed by database event ID and subscription state is applied through a service-role-only database function.
 
-Jobryn uses Stripe-hosted Checkout and Billing Portal. Raw card details do not pass through Jobryn.
+Jobrin.ai uses Stripe-hosted Checkout and Billing Portal. Raw card details do not pass through Jobrin.ai.
 
 ## 4. Production environment
 
@@ -117,8 +117,8 @@ Minimum production variables:
 
 ```env
 NODE_ENV=production
-APP_URL=https://jobryn.org
-CORS_ORIGINS=https://jobryn.org,https://www.jobryn.org
+APP_URL=https://jobrin.ai
+CORS_ORIGINS=https://jobrin.ai,https://www.jobrin.ai
 TRUST_PROXY=1
 
 VITE_SUPABASE_URL=...
@@ -198,7 +198,7 @@ Then verify in staging:
 - rate-limit responses
 - database backup and restore
 - incoming and outbound Twilio SMS, including STOP/START and a deliberately interrupted campaign send
-- verify `jobryn.org` and `www.jobryn.org` resolve over HTTPS before switching Stripe or Twilio to live mode
+- verify `jobrin.ai` and `www.jobrin.ai` resolve over HTTPS before switching Stripe or Twilio to live mode
 
 A real security review and dependency vulnerability scan are still required before accepting customer financial/business data.
 

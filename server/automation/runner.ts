@@ -54,7 +54,7 @@ async function executeAutomaticStep(workspaceId: string, step: { tool: string; i
       }, { subtotal: 0, gst: 0 });
       const { data: quote, error: quoteError } = await supabaseAdmin.from('quotes').insert({
         workspace_id: workspaceId, customer_id: customerId, subtotal_cents: totals.subtotal, gst_cents: totals.gst,
-        total_cents: totals.subtotal + totals.gst, status: 'draft', notes: 'Drafted by a Jobryn automation. Review before sending.',
+        total_cents: totals.subtotal + totals.gst, status: 'draft', notes: 'Drafted by a Jobrin.ai automation. Review before sending.',
       }).select('id,quote_number').single();
       if (quoteError) throw new Error('QUOTE_DRAFT_FAILED');
       const { error: itemError } = await supabaseAdmin.from('quote_items').insert(items.map((item) => ({ ...item, workspace_id: workspaceId, quote_id: quote.id })));

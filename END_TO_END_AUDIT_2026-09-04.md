@@ -1,4 +1,4 @@
-# Jobryn end-to-end audit — 4 September 2026
+# Jobrin.ai end-to-end audit — 4 September 2026
 
 Scope: full codebase and architecture review of `app/` — every server route, all pages, all 19
 migrations, security layer, CI, Docker, Cloudflare worker, environment handling, plus local

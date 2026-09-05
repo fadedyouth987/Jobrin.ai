@@ -1,4 +1,4 @@
-# Jobryn end-to-end audit — 28 August 2026
+# Jobrin.ai end-to-end audit — 28 August 2026
 
 ## Verified working
 

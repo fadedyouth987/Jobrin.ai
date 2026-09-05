@@ -1,8 +1,8 @@
-# Jobryn AI receptionist: production architecture
+# Jobrin.ai AI receptionist: production architecture
 
 ## The decision
 
-Use **Twilio ConversationRelay -> a Cloudflare Worker gateway -> one Cloudflare Durable Object per call -> Jobryn's controlled business tools and Supabase**.
+Use **Twilio ConversationRelay -> a Cloudflare Worker gateway -> one Cloudflare Durable Object per call -> Jobrin.ai's controlled business tools and Supabase**.
 
 This is intentionally not a free-roaming chatbot and not a shared "AI brain" for all callers. A phone call is a real-time, private, operational workflow. One Durable Object, deterministically named from one Twilio Call SID, owns only that call's state. It makes call state durable through WebSocket hibernation and prevents a caller from ever sharing context with another business or caller.
 
@@ -31,7 +31,7 @@ Never allow the receptionist to take card details, quote a binding price, issue 
 ```text
 Caller
   -> Twilio number
-  -> signed POST /api/twilio/voice (Jobryn Express application)
+  -> signed POST /api/twilio/voice (Jobrin.ai Express application)
   -> workspace is selected from the dialled Twilio number
   -> call row is created + a short-lived, signed call token is issued
   -> Twilio ConversationRelay opens WSS /api/receptionist/conversation?token=...

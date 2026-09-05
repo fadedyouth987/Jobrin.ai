@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const base = 'http://localhost:3000';
 const email = `e2e-${Date.now()}@example.com`;
-const password = 'JobrynE2E!2026x';
+const password = 'JobrinAiE2E!2026x';
 
 const supabase = createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_ANON_KEY, {
   auth: { persistSession: false },
@@ -140,7 +140,7 @@ expect('command centre (read-only)', cmd.status === 200 && cmd.payload?.kind ? '
 // 11. Hiring
 const opening = await api('POST', '/api/hiring/openings', { title: 'Apprentice plumber', employment_type: 'apprenticeship' }, workspaceId);
 expect('hiring: create opening', opening, [201]);
-const candidate = await api('POST', '/api/hiring/candidates', { full_name: 'E2E Candidate', source: 'direct', privacy_notice_version: 'jobryn-hiring-v1', consent_captured_at: new Date().toISOString() }, workspaceId);
+const candidate = await api('POST', '/api/hiring/candidates', { full_name: 'E2E Candidate', source: 'direct', privacy_notice_version: 'jobrin-ai-hiring-v1', consent_captured_at: new Date().toISOString() }, workspaceId);
 const candId = candidate.payload?.candidate?.id;
 expect('hiring: create candidate (consent recorded)', candidate, [201]);
 if (candId && opening.payload?.opening?.id) {

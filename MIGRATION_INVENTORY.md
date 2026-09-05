@@ -1,4 +1,4 @@
-# Jobryn migration inventory
+# Jobrin.ai migration inventory
 
 Date: 2026-09-04
 
@@ -16,7 +16,7 @@ Date: 2026-09-04
 ## Supabase connection state
 
 The working copy intentionally contains only `.env.example` placeholders. Production
-credentials are not stored here. The connected Jobryn.AI Supabase project was
+credentials are not stored here. The connected Jobrin.ai.AI Supabase project was
 reviewed separately on 2026-09-04; its hiring and communications migrations were
 applied after a schema/RLS verification.
 
@@ -42,7 +42,7 @@ and the absence of wildcard CORS.
 
 ## Safe migration sequence
 
-1. Rebrand user-facing and process-facing strings to Jobryn. Keep database and
+1. Rebrand user-facing and process-facing strings to Jobrin.ai. Keep database and
    storage identifiers stable. This is the current reversible step.
 2. Connect a non-production Supabase project and record its migration history.
 3. Take a database backup and inventory row counts, RLS policies, grants, functions,
@@ -71,6 +71,6 @@ requires a tested forward migration or database restore plan—never a blind dro
 - Matching server-side URL, publishable key and service-role key in the hosting
   platform's secret store (never committed or sent to the browser).
 - Supabase migration history or a schema dump from the connected project.
-- Configured Auth site URL and allowed redirects for the Jobryn domain.
+- Configured Auth site URL and allowed redirects for the Jobrin.ai domain.
 - Stripe test keys, webhook secret and trusted price IDs in server secrets.
 - A successful `npm run verify` and the staging isolation/billing test results.

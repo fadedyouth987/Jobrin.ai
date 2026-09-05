@@ -48,7 +48,7 @@ app.use('/api', (_req, res, next) => {
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
-    product: 'Jobryn',
+    product: 'Jobrin.ai',
     version: '1.0.0-saas-foundation',
     releaseStatus: env.isProduction ? 'PRODUCTION_CONFIGURATION' : 'PRE_PRODUCTION',
     authConfigured: Boolean(env.SUPABASE_URL && env.SUPABASE_ANON_KEY),

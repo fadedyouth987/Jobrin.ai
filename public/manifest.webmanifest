@@ -1,12 +1,12 @@
 {
-  "name": "Jobryn",
-  "short_name": "Jobryn",
+  "name": "Jobrin.ai",
+  "short_name": "Jobrin.ai",
   "description": "Private hiring and operations for Australian trade businesses.",
   "start_url": "/app",
   "display": "standalone",
   "background_color": "#f8fafc",
   "theme_color": "#4f46e5",
   "icons": [
-    { "src": "/jobryn-mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    { "src": "/jobrin-ai-mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]
 }

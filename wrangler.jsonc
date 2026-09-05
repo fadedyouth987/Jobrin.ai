@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "jobryn",
+  "name": "jobrin-ai",
   "main": "worker.ts",
   "workers_dev": true,
   "preview_urls": false,
@@ -24,8 +24,8 @@
     "CLOUDFLARE_WORKER": "true",
     "NODE_ENV": "production",
     "DEPLOYMENT_STAGE": "production",
-    "APP_URL": "https://jobryn.org",
-    "CORS_ORIGINS": "https://jobryn.org,https://www.jobryn.org",
+    "APP_URL": "https://jobrin.ai",
+    "CORS_ORIGINS": "https://jobrin.ai,https://www.jobrin.ai",
     "TRUST_PROXY": "1",
     "REQUIRE_AAL2_SENSITIVE": "true",
     "REQUIRE_EMAIL_VERIFICATION": "true"
@@ -36,13 +36,16 @@
   },
   "env": {
     "staging": {
-      "name": "jobryn-staging",
+      "name": "jobrin-ai-staging",
+      "durable_objects": {
+        "bindings": [{ "name": "RECEPTIONIST_CALL", "class_name": "ReceptionistCallDO" }]
+      },
       "vars": {
         "CLOUDFLARE_WORKER": "true",
         "NODE_ENV": "test",
         "DEPLOYMENT_STAGE": "staging",
-        "APP_URL": "https://jobryn-staging.nexgen-studio.workers.dev",
-        "CORS_ORIGINS": "https://jobryn-staging.nexgen-studio.workers.dev",
+        "APP_URL": "https://jobrin-ai-staging.nexgen-studio.workers.dev",
+        "CORS_ORIGINS": "https://jobrin-ai-staging.nexgen-studio.workers.dev",
         "TRUST_PROXY": "1",
         "REQUIRE_AAL2_SENSITIVE": "true",
         "REQUIRE_EMAIL_VERIFICATION": "true"

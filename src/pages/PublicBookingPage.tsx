@@ -79,7 +79,7 @@ export default function PublicBookingPage({ slug }: { slug: string }) {
         <h1 className="mt-4 text-2xl font-black">Booking received</h1>
         <p className="mt-2 text-sm leading-6 text-slate-600">{done.serviceName} — {fmt(done.start)}.</p>
         <p className="mt-2 text-sm text-slate-500">{done.note}</p>
-        <p className="mt-4 text-xs text-slate-400">Powered by Jobryn</p>
+        <p className="mt-4 text-xs text-slate-400">Powered by Jobrin.ai</p>
       </Frame>
     );
   }

@@ -1,4 +1,4 @@
-# Jobryn AI receptionist setup
+# Jobrin.ai AI receptionist setup
 
 Read [AI_RECEPTIONIST_ARCHITECTURE.md](./AI_RECEPTIONIST_ARCHITECTURE.md) before enabling this feature. It is the source of truth for the per-call Durable Object design, tool boundaries, rollout gates and required launch controls.
 
@@ -18,15 +18,15 @@ Read [AI_RECEPTIONIST_ARCHITECTURE.md](./AI_RECEPTIONIST_ARCHITECTURE.md) before
 2. Store the Twilio Account SID, Auth Token and E.164 Twilio number as server secrets. Never use `VITE_` for these.
 3. Store `OPENAI_API_KEY` as a server secret.
 4. Deploy staging with `npm run cf:deploy:staging`; deploy production only after all required Worker Secrets and provider tests pass.
-5. Set `APP_URL=https://jobryn.org` and `CORS_ORIGINS=https://jobryn.org,https://www.jobryn.org`.
+5. Set `APP_URL=https://jobrin.ai` and `CORS_ORIGINS=https://jobrin.ai,https://www.jobrin.ai`.
 6. Complete Twilio Conversation Relay onboarding and accept its AI/ML addendum.
-7. Set the Twilio number's POST Voice URL to `https://jobryn.org/api/twilio/voice`.
+7. Set the Twilio number's POST Voice URL to `https://jobrin.ai/api/twilio/voice`.
 8. Implement `/api/receptionist/conversation` with a Cloudflare Durable Object or Agent so each call has isolated WebSocket state. It must validate `X-Twilio-Signature` during the handshake.
 9. Test FAQ, new lead, urgency, booking, transfer, after-hours, interruption, consent refusal and provider failure before unlocking live calls.
 
 ## Product pattern
 
-The design uses the strongest common ideas from Smith.ai, Goodcall and Dialzara: custom greetings and voices, approved business knowledge, service-aware intake, one question at a time, qualification, booking, warm transfers, message fallback, call summaries and configurable follow-up. Jobryn adds tenant isolation, explicit consent and a test-before-live lock.
+The design uses the strongest common ideas from Smith.ai, Goodcall and Dialzara: custom greetings and voices, approved business knowledge, service-aware intake, one question at a time, qualification, booking, warm transfers, message fallback, call summaries and configurable follow-up. Jobrin.ai adds tenant isolation, explicit consent and a test-before-live lock.
 
 ## Safety rules
 

@@ -1,4 +1,4 @@
-# Jobryn Build Verification
+# Jobrin.ai Build Verification
 
 Date: 24 August 2026 (Australia/Adelaide)
 

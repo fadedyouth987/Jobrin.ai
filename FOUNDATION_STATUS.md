@@ -1,4 +1,4 @@
-# Jobryn Secure SaaS Build Status
+# Jobrin.ai Secure SaaS Build Status
 
 ## Implemented in this source build
 
