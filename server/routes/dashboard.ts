@@ -28,7 +28,7 @@ router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
   ] = await Promise.all([
     db.from('leads').select('id,stage', { count: 'exact' }).eq('workspace_id', workspaceId).is('deleted_at', null),
     db.from('customers').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId).is('deleted_at', null),
-    db.from('jobs').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId).is('deleted_at', null),
+    db.from('jobs').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId),
     db.from('jobs').select('id,title,status,scheduled_start,customer_id,customers(display_name)').eq('workspace_id', workspaceId).gte('scheduled_start', startToday.toISOString()).lt('scheduled_start', endToday.toISOString()).order('scheduled_start').limit(12),
     db.from('quotes').select('id,total_cents,status', { count: 'exact' }).eq('workspace_id', workspaceId).in('status', ['sent','viewed','awaiting_approval']),
     db.from('invoices').select('id,balance_due_cents,status').eq('workspace_id', workspaceId).in('status', ['sent','viewed','part_paid','overdue']),
