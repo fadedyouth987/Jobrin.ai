@@ -7,6 +7,10 @@ import type { Options } from 'express-rate-limit';
 type Client = { totalHits: number; resetTime: Date };
 
 export class TimerFreeMemoryStore {
+  // Tells express-rate-limit's single-count validation to key counters by this
+  // store instance rather than the class name — otherwise every limiter using
+  // this class shares one validation bucket and trips false double-counts.
+  readonly localKeys = true;
   private previous = new Map<string, Client>();
   private current = new Map<string, Client>();
   private windowMs = 60_000;
