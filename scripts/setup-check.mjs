@@ -51,7 +51,18 @@ for (const [name, label, unlocks] of serverSecrets) {
 }
 
 // 2. Manual dashboard actions
-info('Supabase dashboard: apply migration supabase/migrations/0020_public_document_links.sql (SQL editor)');
+// These migrations are intentionally listed together: the latest field-completion
+// routes depend on the public-document, job-costing and field-completion schema.
+const requiredMigrations = [
+  '0020_public_document_links.sql',
+  '0021_job_costing_policies.sql',
+  '0022_field_completion_pack.sql',
+];
+for (const migration of requiredMigrations) {
+  const relativePath = `supabase/migrations/${migration}`;
+  if (!fs.existsSync(relativePath)) throw new Error(`Required launch migration is missing: ${relativePath}`);
+}
+info(`Supabase dashboard: apply launch migrations ${requiredMigrations.map((migration) => `supabase/migrations/${migration}`).join(', ')} (SQL editor)`);
 info('Supabase dashboard: Authentication > Policies > enable leaked-password protection');
 info('GitHub: consider flipping the repo to Private (it is currently public)');
 info('Staging: create a separate Supabase project + .env.staging before any Worker deploy');
