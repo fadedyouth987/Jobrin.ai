@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowRight, BarChart3, Bot, BriefcaseBusiness, Calendar, CalendarDays, Check, CheckCircle2, CircleDollarSign, ClipboardList, ContactRound, ExternalLink, FileCheck2, FileText, Inbox, LibraryBig, LockKeyhole, MessageSquareMore, Phone, Plus, RefreshCcw, ReceiptText, ShieldCheck, Sparkles, Star, Wallet, Workflow } from 'lucide-react';
 import { useAuth } from '../app/auth';
 import { AppLink, navigate } from '../app/router';
@@ -9,7 +9,9 @@ import { Card, EmptyState, FeatureStatus, Field, Money, PageIntro, PrimaryButton
 function useData<T>(path: string, initial: T) {
   const { workspaceId } = useAuth();
   const [data,setData]=useState<T>(initial); const [loading,setLoading]=useState(true); const [error,setError]=useState('');
-  const refresh=async()=>{if(!workspaceId)return;setLoading(true);setError('');try{setData(await apiFetch<T>(path,{},workspaceId))}catch(err:any){setError(err.message)}finally{setLoading(false)}};
+  const cancelled = useRef(false);
+  useEffect(()=>{cancelled.current=false;return()=>{cancelled.current=true}},[]);
+  const refresh=async()=>{if(!workspaceId)return;setLoading(true);setError('');try{const result=await apiFetch<T>(path,{},workspaceId);if(!cancelled.current){setData(result)}}catch(err:any){if(!cancelled.current){setError(err.message)}}finally{if(!cancelled.current){setLoading(false)}}};
   useEffect(()=>{void refresh()},[workspaceId,path]);
   return {data,loading,error,refresh};
 }
