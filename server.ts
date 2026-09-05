@@ -16,6 +16,7 @@ import { twilioConfigured } from './server/providers/twilio';
 import receptionistRouter, { receptionistWebhookRouter } from './server/routes/receptionist';
 import businessBrainRouter from './server/routes/businessBrain';
 import hiringRouter from './server/routes/hiring';
+import notificationsRouter from './server/routes/notifications';
 import publicRouter from './server/routes/public';
 import { emailConfigured } from './server/providers/email';
 
@@ -76,6 +77,7 @@ app.use('/api/communications', communicationsRouter);
 app.use('/api/receptionist', receptionistRouter);
 app.use('/api/business-brain', businessBrainRouter);
 app.use('/api/hiring', hiringRouter);
+app.use('/api/notifications', notificationsRouter);
 // Public customer-facing document links require no user session and enforce
 // their own strict rate limit.
 app.use('/api/public', publicRouter);

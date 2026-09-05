@@ -187,3 +187,28 @@ export async function writeAudit(
     severity,
   });
 }
+
+// Owner-facing notifications are best-effort: they enrich the experience but
+// must never break the business operation that produced them.
+export async function writeNotification(
+  workspaceId: string,
+  type: string,
+  title: string,
+  body = '',
+  resourceType?: string,
+  resourceId?: string,
+): Promise<void> {
+  if (!env.SUPABASE_SERVICE_ROLE_KEY) return;
+  try {
+    await supabaseAdmin.from('notifications').insert({
+      workspace_id: workspaceId,
+      type,
+      title,
+      body,
+      resource_type: resourceType ?? null,
+      resource_id: resourceId ?? null,
+    });
+  } catch {
+    // best-effort by design
+  }
+}

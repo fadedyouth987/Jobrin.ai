@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncRoute, validateBody } from '../security';
-import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest, writeAudit } from '../supabase';
+import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest, writeAudit, writeNotification } from '../supabase';
 
 const router = Router();
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('crm.core'));
@@ -108,6 +108,7 @@ router.post('/leads', requireRole('owner','admin','manager','staff'), validateBo
   const { data, error } = await db.from('leads').insert({ ...req.body, workspace_id: req.workspaceId!, created_by: req.auth!.userId }).select('*').single();
   if (error) return res.status(400).json({ error: 'LEAD_CREATE_FAILED', message: error.message });
   await writeAudit(req, 'lead.created', 'lead', data.id);
+  await writeNotification(req.workspaceId!, 'lead.created', 'New lead needs a response', `${data.title} — move it through the pipeline while it is fresh.`, 'lead', data.id);
   res.status(201).json({ lead: data });
 }));
 

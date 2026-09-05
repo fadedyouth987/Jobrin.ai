@@ -10,9 +10,9 @@ import { AppLink, navigate, usePathname } from '../app/router';
 import { logoutUser } from '../lib/supabase';
 import { apiFetch } from '../lib/api';
 import {
-  AnalyticsPage, ApprovalsPage, AutomationsPage, BillingPage, CommandCentrePage,
+  AnalyticsPage, ApprovalsPage, AutomationsPage, BillingPage, CapabilityMapPage, CommandCentrePage,
   CustomersPage, DashboardPage, InboxPage, IntegrationsPage, KnowledgePage, LeadsPage,
-  MarketingPage, ModulePage, OperationsListPage, OperatorPage, ReceptionistPage, ReviewsPage, SecuritySettingsPage, SettingsPage, TeamPage,
+  MarketingPage, ModulePage, NotificationsPage, OperationsListPage, OperatorPage, ReceptionistPage, ReviewsPage, SecuritySettingsPage, SettingsPage, TeamPage,
 } from './AppPages';
 import { HiringPage } from './HiringPage';
 import { CustomerDetailPage, JobDetailPage } from './OperationalDetailPages';
@@ -23,9 +23,9 @@ type NavItem = [string, string, React.ComponentType<{ className?: string }>];
 type NavGroup = { label: string; items: NavItem[] };
 
 const groups: NavGroup[] = [
-  { label:'', items:[['/app','Today',Home],['/app/inbox','Inbox',Inbox],['/app/customers','Customers',ContactRound],['/app/schedule','Schedule',CalendarDays],['/app/jobs','Jobs',FileCheck2],['/app/operator/phone','AI Receptionist',Phone]] },
+  { label:'', items:[['/app','Today',Home],['/app/inbox','Inbox',Inbox],['/app/notifications','Notifications',Bell],['/app/customers','Customers',ContactRound],['/app/schedule','Schedule',CalendarDays],['/app/jobs','Jobs',FileCheck2],['/app/operator/phone','AI Receptionist',Phone]] },
   { label:'Money', items:[['/app/quotes','Quotes',FileText],['/app/invoices','Invoices',ReceiptText],['/app/payments','Payments',CircleDollarSign]] },
-  { label:'More', items:[['/app/hiring','Hiring',UserRoundPlus],['/app/leads','Leads',BriefcaseBusiness],['/app/marketing','Marketing SMS',MessageSquareMore],['/app/command','Command Centre',Sparkles],['/app/brain','AI Memory',Brain],['/app/automations','Automations',Workflow],['/app/reviews','Reviews',Star],['/app/analytics','Analytics',BarChart3],['/app/knowledge','Knowledge',LibraryBig],['/app/operator','Operator log',Bot],['/app/approvals','Approvals',ShieldCheck],['/app/integrations','Integrations',PlugZap],['/app/team','Team',Users],['/app/billing','Billing',CreditCard],['/app/settings','Settings',Settings]] },
+  { label:'More', items:[['/app/hiring','Hiring',UserRoundPlus],['/app/leads','Leads',BriefcaseBusiness],['/app/marketing','Marketing SMS',MessageSquareMore],['/app/command','Command Centre',Sparkles],['/app/brain','AI Memory',Brain],['/app/automations','Automations',Workflow],['/app/capabilities','What Jobryn can do',Sparkles],['/app/reviews','Reviews',Star],['/app/analytics','Analytics',BarChart3],['/app/knowledge','Knowledge',LibraryBig],['/app/operator','Operator log',Bot],['/app/approvals','Approvals',ShieldCheck],['/app/integrations','Integrations',PlugZap],['/app/team','Team',Users],['/app/billing','Billing',CreditCard],['/app/settings','Settings',Settings]] },
 ];
 
 export default function AppShell() {
@@ -74,6 +74,8 @@ function routePage(path:string) {
   if(path==='/app')return <DashboardPage/>;
   if(path==='/app/command')return <CommandCentrePage/>;
   if(path==='/app/inbox')return <InboxPage/>;
+  if(path==='/app/notifications')return <NotificationsPage/>;
+  if(path==='/app/capabilities')return <CapabilityMapPage/>;
   if(path==='/app/marketing')return <MarketingPage/>;
   if(path==='/app/hiring')return <HiringPage/>;
   if(path==='/app/leads')return <LeadsPage/>;

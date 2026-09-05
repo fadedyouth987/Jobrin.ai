@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { env } from '../env';
-import { supabaseAdmin } from '../supabase';
+import { supabaseAdmin, writeNotification } from '../supabase';
 
 // The signed real-time conversation layer for the AI receptionist.
 // Runtime-portable: the same session logic runs over the local WebSocket
@@ -179,6 +179,7 @@ async function recordMessageTake(context: CallContext, fromNumber: string | null
       tool_name: 'message.take', risk_level: 'low', input: { callSid: (context as unknown as { callSid?: string }).callSid ?? null },
       approval_required: false, status: 'completed', output: { leadId: lead.data?.id ?? null },
     });
+    await writeNotification(context.workspaceId, 'receptionist.message_taken', 'AI receptionist took a callback request', note, 'lead', lead.data?.id ?? null);
     return `Callback task created (lead ${lead.data?.id ? 'saved' : 'pending'}).`;
   } catch {
     return 'Callback task recorded locally.';
@@ -295,6 +296,7 @@ export class ReceptionistSession {
       const finalSummary = this.messageTaken ? `[message taken] ${summary}`.slice(0, 2000) : summary;
       const patch: Record<string, unknown> = { summary: finalSummary, updated_at: new Date().toISOString() };
       await supabaseAdmin.from('calls').update(patch).eq('workspace_id', this.workspaceId).eq('provider_call_id', this.callSid);
+      await writeNotification(this.workspaceId, 'receptionist.call_handled', 'AI receptionist handled a call', finalSummary.slice(0, 300));
     } catch {
       // Without the service-role key the summary stays in memory only.
     }

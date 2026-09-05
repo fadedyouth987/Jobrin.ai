@@ -16,6 +16,7 @@
     "security:check": "node scripts/security-check.mjs",
     "test": "tsx --test tests/*.test.ts",
     "verify": "npm run typecheck && npm run security:check && npm run build",
+    "setup:check": "node scripts/setup-check.mjs",
     "cf:typegen": "wrangler types",
     "cf:dry-run": "npm run build:staging && wrangler deploy --dry-run --env staging",
     "cf:deploy:staging": "npm run build:staging && wrangler deploy --env staging",
