@@ -4,6 +4,9 @@ import { env } from './server/env';
 import { processBusinessBrainQueue } from './server/ai/businessBrainWorker';
 import { processAutomationRuns } from './server/automation/runner';
 import { markReceptionistEngineAttached, ReceptionistSession, verifyCallToken } from './server/ai/receptionistCall';
+import { ReceptionistCallDO } from './server/ai/receptionistDO';
+
+export { ReceptionistCallDO };
 
 // Cloudflare translates Fetch API requests into Node HTTP requests so the
 // existing, tested Express security and routing layer remains the API boundary.
@@ -23,61 +26,29 @@ function safeSend(ws: { send: (data: string) => void }, payload: Record<string, 
 // Node server exposes. The upgrade is validated (token + expiry) before the
 // per-call session starts; per-call state lives in this isolate for the call
 // duration, with the Durable Object upgrade documented as hardening.
-async function handleConversationUpgrade(request: Request, ctx: ExecutionContext): Promise<Response> {
-  try {
-    return await upgradeConversation(request, ctx);
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(JSON.stringify({ level: 'error', message: 'receptionist upgrade failed', error: message }));
-    return new Response(`Conversation upgrade failed: ${message}`, { status: 500 });
-  }
-}
-
-async function upgradeConversation(request: Request, ctx: ExecutionContext): Promise<Response> {
+async function handleConversationUpgrade(request: Request, env: unknown, ctx: ExecutionContext): Promise<Response> {
   const token = new URL(request.url).searchParams.get('token') || '';
   const auth = verifyCallToken(token);
   if (!auth) return new Response('Invalid call token', { status: 401 });
-  // workerd returns numeric-keyed sockets: 0 = client, 1 = server.
-  const pair = new WebSocketPair() as unknown as Record<number, unknown>;
-  const sockets = Object.values(pair);
-  const client = sockets[0] as unknown;
-  const server = sockets[1] as {
-    accept: () => void;
-    send: (data: string) => void;
-    addEventListener: (type: string, listener: (event: MessageEvent | CloseEvent) => void) => void;
-  };
-  server.accept();
-  // HARD RULE: phone calls are always served in receptionist mode.
-  const session = new ReceptionistSession({ workspaceId: auth.workspaceId, callSid: auth.callSid, mode: 'receptionist' });
-  server.addEventListener('message', (event) => {
-    void (async () => {
-      let parsed: { type?: string; voicePrompt?: string; customParameters?: Record<string, string> };
-      try { parsed = JSON.parse(String((event as MessageEvent).data)) as typeof parsed; } catch { return; }
-      if (parsed.type === 'setup') {
-        const from = parsed.customParameters?.fromNumber || parsed.customParameters?.From || null;
-        if (from) session.fromNumber = from;
-        await session.loadContext().finally(() => undefined);
-        safeSend(server, { type: 'text', token: session.greeting(), last: true });
-        return;
-      }
-      if (parsed.type === 'prompt') {
-        const userText = String(parsed.voicePrompt || '').slice(0, 1000);
-        if (!userText.trim()) return;
-        const result = await session.handleUserText(userText).catch(() => null);
-        safeSend(server, { type: 'text', token: result?.reply || 'Sorry, could you say that again for me?', last: true });
-        return;
-      }
-    })();
-  });
-  server.addEventListener('close', () => { ctx.waitUntil(session.finalize().then(() => undefined, () => undefined)); });
-  return new Response(null, { status: 101, webSocket: client as never });
+  // Forward the upgrade to the per-call Durable Object, deterministically
+  // named from the CallSid. The DO owns only this call's state.
+  const doNamespace = (env as { RECEPTIONIST_CALL?: { idFromName: (name: string) => unknown; get: (id: unknown) => { fetch: (req: Request) => Promise<Response> } } }).RECEPTIONIST_CALL;
+  if (!doNamespace) return new Response('DO not available', { status: 500 });
+  const doId = doNamespace.idFromName(`receptionist-call:${auth.callSid}`);
+  const stub = doNamespace.get(doId);
+  const doUrl = new URL(request.url);
+  doUrl.pathname = '/ws';
+  doUrl.searchParams.set('w', auth.workspaceId);
+  doUrl.searchParams.set('c', auth.callSid);
+  const doRequest = new Request(doUrl.toString(), request);
+  return stub.fetch(doUrl.toString(), { headers: request.headers });
 }
 
 export default {
   async fetch(request: Request, env2: unknown, ctx: ExecutionContext): Promise<Response | Promise<Response>> {
     const url = new URL(request.url);
     if (request.headers.get('upgrade')?.toLowerCase() === 'websocket' && url.pathname === '/api/receptionist/conversation') {
-      return handleConversationUpgrade(request, ctx);
+      return handleConversationUpgrade(request, env2, ctx);
     }
     return (httpHandler as { fetch: (req: Request, e: unknown, c: ExecutionContext) => Promise<Response> | Response }).fetch(request, env2, ctx);
   },

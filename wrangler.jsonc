@@ -10,6 +10,8 @@
     "enable_nodejs_http_modules",
     "enable_nodejs_http_server_modules"
   ],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ReceptionistCallDO"] }],
+  "durable_objects": { "bindings": [{ "name": "RECEPTIONIST_CALL", "class_name": "ReceptionistCallDO" }] },
   "assets": {
     "directory": "./dist/client",
     "not_found_handling": "single-page-application",

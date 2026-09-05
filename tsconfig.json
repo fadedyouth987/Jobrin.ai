@@ -25,6 +25,7 @@
   },
   "exclude": [
     "server.legacy.ts",
+    "server/ai/receptionistDO.ts",
     "worker.ts",
     "worker-configuration.d.ts"
   ]
