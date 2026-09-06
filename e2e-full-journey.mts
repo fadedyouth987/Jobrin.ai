@@ -5,10 +5,11 @@ const BASE = 'http://localhost:3000';
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_ANON = process.env.SUPABASE_ANON_KEY || '';
 
-async function api(method, path, body, token, workspace) {
+async function api(method: string, path: string, body?: unknown, token?: string, workspace?: string, extraHeaders?: Record<string, string>) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (workspace) headers['x-workspace-id'] = workspace;
+  if (extraHeaders) Object.assign(headers, extraHeaders);
   const res = await fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const payload = await res.json().catch(() => ({}));
   return { status: res.status, payload };
@@ -56,7 +57,7 @@ async function main() {
   const token = signInData.access_token;
 
   // 2. Workspace creation
-  const ws = await api('POST', '/api/workspaces', { name: 'E2E Final Test Plumbing' }, token);
+  const ws = await api('POST', '/api/workspaces', { name: 'E2E Final Test Plumbing 1788701889691' }, token);
   if (ws.status !== 201) { log('create workspace', 'FAIL', JSON.stringify(ws.payload).slice(0, 200)); process.exit(1); }
   const wsId = ws.payload.workspaceId;
   log('create workspace', 'PASS', wsId.slice(0, 8));

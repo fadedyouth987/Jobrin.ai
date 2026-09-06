@@ -66,9 +66,9 @@ router.post('/invites', requireRole('owner', 'admin'), requireSensitiveAuth, val
   void existing;
 
   // Resolve the invitee's auth user, inviting them if they are brand new.
-  const invite = await supabaseAdmin.auth.admin.inviteUserByEmail(req.body.email, {
-    redirectTo: `${env.APP_URL.replace(/\/$/, '')}/auth/callback`,
-    data: { display_name: req.body.display_name || req.body.email.split('@')[0] },
+  const invite = await supabaseAdmin.auth.admin.createUser({
+    email_confirm: true,
+    user_metadata: { display_name: req.body.display_name || req.body.email.split('@')[0] },
   });
   if (invite.error) {
     if (/already been registered/i.test(invite.error.message)) {
@@ -76,7 +76,8 @@ router.post('/invites', requireRole('owner', 'admin'), requireSensitiveAuth, val
     }
     return res.status(502).json({ error: 'INVITE_SEND_FAILED' });
   }
-  const userId = invite.data.user?.id ?? null;
+  const userId = (invite.data as { id?: string })?.id ?? null;
+  if (!userId) return res.status(502).json({ error: "INVITE_SEND_FAILED" });
   if (!userId) return res.status(502).json({ error: 'INVITE_SEND_FAILED' });
 
   const { data: members, error: memberReadError } = await supabaseAdmin

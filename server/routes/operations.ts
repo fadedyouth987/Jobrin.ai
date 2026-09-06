@@ -572,6 +572,7 @@ router.patch('/invoices/:id/send', requireRole('owner','admin','manager','staff'
   if (emailConfigured() && customer?.email) {
     const dueText = invoice.due_at ? ` Payment is due by ${new Date(invoice.due_at).toLocaleDateString('en-AU')}.` : '';
     if (stripe && Number(invoice.balance_due_cents) > 0) {
+      try {
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
         line_items: [{ price_data: { currency: 'aud', product_data: { name: `Invoice #${invoice.invoice_number}` }, unit_amount: Number(invoice.balance_due_cents) }, quantity: 1 }],
@@ -583,18 +584,19 @@ router.patch('/invoices/:id/send', requireRole('owner','admin','manager','staff'
         cancel_url: `${env.APP_URL}/payment-cancelled`,
       }, { idempotencyKey: `invoice-send:${req.workspaceId}:${invoice.id}:${invoice.balance_due_cents}` });
       paymentUrl = session.url ?? null;
+      } catch (stripeErr: any) {
+        console.error(JSON.stringify({ level: "warn", message: "Stripe checkout failed during invoice send", error: String(stripeErr?.message || "").slice(0, 200) }));
+      }
     }
     const result = await sendEmail({
       to: customer.email,
       subject: `Invoice #${invoice.invoice_number}`,
-      text: `Hi ${customer?.display_name || 'there'},\n\nInvoice #${invoice.invoice_number} for $${(Number(invoice.total_cents) / 100).toFixed(2)} is ready.${dueText}${paymentUrl ? `\n\nPay securely online here:\n${paymentUrl}` : ''}\n\nThank you for your business.`,
+      text: `Hi ${customer?.display_name || 'there'},\n\nInvoice #${invoice.invoice_number} for ${(Number(invoice.total_cents) / 100).toFixed(2)} is ready.${dueText}${paymentUrl ? `\n\nPay securely online here:\n${paymentUrl}` : ''}\n\nThank you for your business.`,
     });
     delivery = result.delivered ? 'sent' : 'failed';
   } else if (emailConfigured()) {
     delivery = 'no_customer_email';
-  }
-
-  await writeAudit(req, 'invoice.sent', 'invoice', invoice.id, { delivery });
+  }await writeAudit(req, 'invoice.sent', 'invoice', invoice.id, { delivery });
   res.json({ invoice: updated, delivery, paymentUrl });
 }));
 
