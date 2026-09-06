@@ -26,7 +26,7 @@
 - AI generation: Gemini server key is absent locally.
 - Transactional email, calendar, accounting, review delivery and social publishing providers are not connected.
 - Durable background worker, retries and dead-letter processing are schema-only and not running.
-- Hostinger continuous deployment, production domain, monitoring, backup restore and rollback drills are not verified.
+- Cloudflare Workers deployment, production domain, monitoring, backup restore and rollback drills are not verified.
 
 These items must remain visibly disabled. They are not production-complete merely because database tables or UI placeholders exist.
 
