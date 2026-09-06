@@ -67,6 +67,7 @@ router.post('/invites', requireRole('owner', 'admin'), requireSensitiveAuth, val
 
   // Resolve the invitee's auth user, inviting them if they are brand new.
   const invite = await supabaseAdmin.auth.admin.createUser({
+    email: req.body.email,
     email_confirm: true,
     user_metadata: { display_name: req.body.display_name || req.body.email.split('@')[0] },
   });

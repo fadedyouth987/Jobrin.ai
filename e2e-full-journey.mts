@@ -57,7 +57,7 @@ async function main() {
   const token = signInData.access_token;
 
   // 2. Workspace creation
-  const ws = await api('POST', '/api/workspaces', { name: 'E2E Final Test Plumbing 1788701889691' }, token);
+  const ws = await api('POST', '/api/workspaces', { name: 'E2E Final Test Plumbing v31788702524921 v21788702425014 v1788702299883 1788701889691' }, token);
   if (ws.status !== 201) { log('create workspace', 'FAIL', JSON.stringify(ws.payload).slice(0, 200)); process.exit(1); }
   const wsId = ws.payload.workspaceId;
   log('create workspace', 'PASS', wsId.slice(0, 8));
@@ -67,7 +67,7 @@ async function main() {
   // 3. Business profile
   const bp = await api('PUT', '/api/workspaces/business-profile', {
     trading_name: 'E2E Final Plumbing', abn: '11 222 333 444', industry: 'plumbing',
-    phone: '0412 345 678', email: 'test@example.com', timezone: 'Australia/Adelaide', gst_registered: true,
+    phone: '0412 345 678', email: 'test@gmail.com', timezone: 'Australia/Adelaide', gst_registered: true,
   }, token, w);
   log('business profile', bp.status === 200 ? 'PASS' : 'FAIL', bp.status.toString());
 
