@@ -532,6 +532,30 @@ router.get('/invoices', asyncRoute(async (req: AuthenticatedRequest, res) => {
   res.json({ invoices: data ?? [] });
 }));
 
+// Shared invoice payment-session builder. The email send and the manual
+// checkout link must resolve to the SAME Stripe session for a given invoice
+// balance (deterministic idempotency key), so a customer can never hold two
+// links that each charge the full amount.
+async function createInvoicePaymentSession(params: {
+  workspaceId: string;
+  invoice: { id: string; invoice_number: string; balance_due_cents: number | string; customer_id: string };
+  customerEmail?: string | null;
+}) {
+  if (!stripe) throw new Error('STRIPE_NOT_CONFIGURED');
+  const amount = Number(params.invoice.balance_due_cents);
+  return stripe.checkout.sessions.create({
+    mode:'payment',
+    line_items:[{price_data:{currency:'aud',product_data:{name:`Jobrin.ai invoice #${params.invoice.invoice_number}`,description:'Secure invoice payment'},unit_amount:amount},quantity:1}],
+    customer_email:params.customerEmail||undefined,
+    client_reference_id:params.invoice.id,
+    metadata:{workspace_id:params.workspaceId,invoice_id:params.invoice.id,customer_id:params.invoice.customer_id,amount_cents:String(amount)},
+    payment_intent_data:{metadata:{workspace_id:params.workspaceId,invoice_id:params.invoice.id,customer_id:params.invoice.customer_id}},
+    success_url:`${env.APP_URL}/payment-complete?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url:`${env.APP_URL}/payment-cancelled`,
+    integration_identifier:'jobrin-ai_pay_fhwktzpn',
+  },{idempotencyKey:`invoice-pay:${params.workspaceId}:${params.invoice.id}:${amount}`});
+}
+
 router.post('/invoices', requireRole('owner','admin','manager','staff'), validateBody(z.object({
   customer_id: z.string().uuid(),
   job_id: z.string().uuid().nullable().optional(),
@@ -561,42 +585,51 @@ router.patch('/invoices/:id/send', requireRole('owner','admin','manager','staff'
   if (readError) return res.status(500).json({ error: 'INVOICE_READ_FAILED' });
   if (!invoice) return res.status(404).json({ error: 'INVOICE_NOT_FOUND' });
   if (invoice.status !== 'draft') return res.status(409).json({ error: 'INVOICE_NOT_SENDABLE', status: invoice.status });
+
+  const customer = Array.isArray(invoice.customers) ? invoice.customers[0] : invoice.customers;
+  const customerEmail = customer?.email || null;
+
+  // Everything that can fail runs BEFORE the invoice is marked sent. A Stripe
+  // or email failure leaves the invoice in draft — retryable — instead of
+  // stranded as "sent" with no payment link and no way to send it again. The
+  // final status flip is guarded on status='draft', so only one concurrent
+  // sender can complete the send.
+  let paymentUrl: string | null = null;
+  if (stripe && customerEmail && Number(invoice.balance_due_cents) > 0) {
+    try {
+      const session = await createInvoicePaymentSession({ workspaceId: req.workspaceId!, invoice, customerEmail });
+      paymentUrl = session.url ?? null;
+      if (!paymentUrl) throw new Error('STRIPE_CHECKOUT_URL_MISSING');
+    } catch (stripeErr: any) {
+      console.error(JSON.stringify({ level: 'error', requestId: (req as typeof req & { requestId?: string }).requestId, workspaceId: req.workspaceId, invoiceId: invoice.id, message: 'Stripe checkout failed during invoice send', error: String(stripeErr?.message || '').slice(0, 200) }));
+      return res.status(502).json({ error: 'STRIPE_CHECKOUT_FAILED', message: 'The invoice was not sent and stays in draft. Retry once Stripe is reachable.' });
+    }
+  }
+
+  let delivery: 'sent' | 'not_configured' | 'no_customer_email' = 'not_configured';
+  if (customerEmail && emailConfigured()) {
+    const dueText = invoice.due_at ? ` Payment is due by ${new Date(invoice.due_at).toLocaleDateString('en-AU')}.` : '';
+    const result = await sendEmail({
+      to: customerEmail,
+      subject: `Invoice #${invoice.invoice_number}`,
+      text: `Hi ${customer?.display_name || 'there'},\n\nInvoice #${invoice.invoice_number} for $${(Number(invoice.total_cents) / 100).toFixed(2)} is ready.${dueText}${paymentUrl ? `\n\nPay securely online here:\n${paymentUrl}` : ''}\n\nThank you for your business.`,
+    });
+    if (!result.delivered) {
+      return res.status(502).json({ error: 'EMAIL_SEND_FAILED', message: 'The invoice was not sent and stays in draft. Retry once email delivery works.' });
+    }
+    delivery = 'sent';
+  } else if (emailConfigured()) {
+    // No address on the customer record: the owner can still treat the
+    // invoice as sent and deliver it by other means.
+    delivery = 'no_customer_email';
+  }
+
   const now = new Date().toISOString();
   const { data: updated, error: updateError } = await db.from('invoices').update({ status: 'sent', sent_at: now, updated_at: now })
     .eq('id', invoice.id).eq('workspace_id', req.workspaceId!).eq('status', 'draft').select('id,invoice_number,status,sent_at').single();
   if (updateError || !updated) return res.status(409).json({ error: 'INVOICE_SEND_CONFLICT' });
 
-  let delivery: 'sent' | 'not_configured' | 'no_customer_email' | 'failed' = 'not_configured';
-  let paymentUrl: string | null = null;
-  const customer = Array.isArray(invoice.customers) ? invoice.customers[0] : invoice.customers;
-  if (emailConfigured() && customer?.email) {
-    const dueText = invoice.due_at ? ` Payment is due by ${new Date(invoice.due_at).toLocaleDateString('en-AU')}.` : '';
-    if (stripe && Number(invoice.balance_due_cents) > 0) {
-      try {
-      const session = await stripe.checkout.sessions.create({
-        mode: 'payment',
-        line_items: [{ price_data: { currency: 'aud', product_data: { name: `Invoice #${invoice.invoice_number}` }, unit_amount: Number(invoice.balance_due_cents) }, quantity: 1 }],
-        customer_email: customer.email || undefined,
-        client_reference_id: invoice.id,
-        metadata: { workspace_id: req.workspaceId!, invoice_id: invoice.id, customer_id: invoice.customer_id, amount_cents: String(invoice.balance_due_cents) },
-        payment_intent_data: { metadata: { workspace_id: req.workspaceId!, invoice_id: invoice.id, customer_id: invoice.customer_id } },
-        success_url: `${env.APP_URL}/payment-complete?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${env.APP_URL}/payment-cancelled`,
-      }, { idempotencyKey: `invoice-send:${req.workspaceId}:${invoice.id}:${invoice.balance_due_cents}` });
-      paymentUrl = session.url ?? null;
-      } catch (stripeErr: any) {
-        console.error(JSON.stringify({ level: "warn", message: "Stripe checkout failed during invoice send", error: String(stripeErr?.message || "").slice(0, 200) }));
-      }
-    }
-    const result = await sendEmail({
-      to: customer.email,
-      subject: `Invoice #${invoice.invoice_number}`,
-      text: `Hi ${customer?.display_name || 'there'},\n\nInvoice #${invoice.invoice_number} for ${(Number(invoice.total_cents) / 100).toFixed(2)} is ready.${dueText}${paymentUrl ? `\n\nPay securely online here:\n${paymentUrl}` : ''}\n\nThank you for your business.`,
-    });
-    delivery = result.delivered ? 'sent' : 'failed';
-  } else if (emailConfigured()) {
-    delivery = 'no_customer_email';
-  }await writeAudit(req, 'invoice.sent', 'invoice', invoice.id, { delivery });
+  await writeAudit(req, 'invoice.sent', 'invoice', invoice.id, { delivery });
   res.json({ invoice: updated, delivery, paymentUrl });
 }));
 
@@ -619,19 +652,7 @@ router.post('/invoices/:id/checkout', requireRole('owner','admin','manager'), re
   const customer=Array.isArray(invoice.customers)?invoice.customers[0]:invoice.customers;
   const amount=Number(invoice.balance_due_cents);
   if(!Number.isSafeInteger(amount)||amount<=0)return res.status(409).json({error:'INVALID_INVOICE_BALANCE'});
-  const session=await stripe.checkout.sessions.create({
-    mode:'payment',
-    line_items:[{price_data:{currency:'aud',product_data:{name:`Jobrin.ai invoice #${invoice.invoice_number}`,description:'Secure invoice payment'},unit_amount:amount},quantity:1}],
-    customer_email:customer?.email||undefined,
-    client_reference_id:invoice.id,
-    metadata:{workspace_id:req.workspaceId!,invoice_id:invoice.id,customer_id:invoice.customer_id,amount_cents:String(amount)},
-    payment_intent_data:{metadata:{workspace_id:req.workspaceId!,invoice_id:invoice.id,customer_id:invoice.customer_id}},
-    success_url:`${env.APP_URL}/payment-complete?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url:`${env.APP_URL}/payment-cancelled`,
-    integration_identifier:'jobrin-ai_pay_fhwktzpn',
-  // A deterministic Stripe key returns the same live session for this invoice
-  // balance, preventing two payment links from charging the same balance.
-  },{idempotencyKey:`invoice-checkout:${req.workspaceId}:${invoice.id}:${amount}`});
+  const session=await createInvoicePaymentSession({workspaceId:req.workspaceId!,invoice,customerEmail:customer?.email||null});
   if(!session.url)return res.status(502).json({error:'STRIPE_CHECKOUT_URL_MISSING'});
   await writeAudit(req,'invoice.checkout.created','invoice',invoice.id,{amount_cents:amount});
   res.json({checkoutUrl:session.url,expiresAt:session.expires_at?new Date(session.expires_at*1000).toISOString():null});

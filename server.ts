@@ -13,6 +13,8 @@ import teamRouter from './server/routes/team';
 import billingRouter, { stripeWebhookRouter } from './server/routes/billing';
 import communicationsRouter, { twilioWebhookRouter } from './server/routes/communications';
 import { twilioConfigured } from './server/providers/twilio';
+import { stripeConfigured } from './server/providers/stripe';
+import { openaiConfigured } from './server/providers/openai';
 import receptionistRouter, { receptionistWebhookRouter } from './server/routes/receptionist';
 import businessBrainRouter from './server/routes/businessBrain';
 import hiringRouter from './server/routes/hiring';
@@ -54,9 +56,9 @@ app.get('/api/health', (_req, res) => {
     authConfigured: Boolean(env.SUPABASE_URL && env.SUPABASE_ANON_KEY),
     databaseConfigured: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY),
     privilegedDatabaseConfigured: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY),
-    stripeConfigured: Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET),
-    aiConfigured: Boolean((env.GEMINI_API_KEY && env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY') || env.OPENAI_API_KEY),
-    businessBrainWorkerConfigured: Boolean(env.SUPABASE_SERVICE_ROLE_KEY && env.OPENAI_API_KEY),
+    stripeConfigured: stripeConfigured(),
+    aiConfigured: openaiConfigured(),
+    businessBrainWorkerConfigured: Boolean(env.SUPABASE_SERVICE_ROLE_KEY) && openaiConfigured(),
     messagingConfigured: twilioConfigured(),
     emailConfigured: emailConfigured(),
     automationRunnerConfigured: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),

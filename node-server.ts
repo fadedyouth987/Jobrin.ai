@@ -3,6 +3,7 @@ import express from 'express';
 import { app, finalizeApp } from './server';
 import { env } from './server/env';
 import { startBusinessBrainWorker } from './server/ai/businessBrainWorker';
+import { openaiConfigured } from './server/providers/openai';
 import { startAutomationRunner } from './server/automation/runner';
 import { attachReceptionistWebSocket } from './server/ws/receptionistSocket';
 
@@ -35,7 +36,7 @@ async function startServer() {
   finalizeApp();
   const server = app.listen(env.PORT, '0.0.0.0', () => {
     console.log(JSON.stringify({ level: 'info', message: 'Jobrin.ai server started', port: env.PORT, environment: env.NODE_ENV }));
-    if (env.SUPABASE_SERVICE_ROLE_KEY && env.OPENAI_API_KEY) startBusinessBrainWorker();
+    if (env.SUPABASE_SERVICE_ROLE_KEY && openaiConfigured()) startBusinessBrainWorker();
     if (env.SUPABASE_SERVICE_ROLE_KEY) startAutomationRunner();
   });
   attachReceptionistWebSocket(server);

@@ -135,8 +135,6 @@ STRIPE_PRICE_OPERATOR=...
 
 REQUIRE_AAL2_SENSITIVE=true
 REQUIRE_EMAIL_VERIFICATION=true
-GEMINI_API_KEY=...
-GEMINI_MODEL=gemini-3.7-flash
 ```
 
 Use a managed secrets store on your host. Do not place secrets in `VITE_*` variables or source control.

@@ -189,8 +189,18 @@ export async function processAutomationRuns(limit = 5) {
 }
 
 export function startAutomationRunner() {
-  const timer = setInterval(() => { void processAutomationRuns(); }, 30_000);
+  // A failed tick (database down, transient Supabase error) must never
+  // become an unhandled rejection that kills the HTTP server: log it and
+  // let the next interval retry. The error still propagates from
+  // processAutomationRuns itself, so the Cloudflare cron path (waitUntil)
+  // keeps its failure visibility.
+  const runSafely = () => {
+    void processAutomationRuns().catch((error) => {
+      console.error(JSON.stringify({ level: 'error', component: 'automation_runner', message: 'Automation tick failed; retrying next interval', error: String((error as Error)?.message || error).slice(0, 200) }));
+    });
+  };
+  const timer = setInterval(runSafely, 30_000);
   timer.unref();
-  void processAutomationRuns();
+  runSafely();
   return timer;
 }

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { env } from '../env';
+import { openaiConfigured } from '../providers/openai';
 import { supabaseAdmin, writeNotification } from '../supabase';
 
 // The signed real-time conversation layer for the AI receptionist — and the
@@ -286,7 +287,7 @@ async function recordMessageTake(context: CallContext, fromNumber: string | null
 }
 
 async function openaiChat(messages: Array<{ role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }>, tools: unknown[] = []): Promise<{ configured: boolean; message: { role: 'assistant'; content: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> } | null }> {
-  if (!env.OPENAI_API_KEY) return { configured: false, message: null };
+  if (!openaiConfigured()) return { configured: false, message: null };
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
@@ -347,7 +348,7 @@ export class ReceptionistSession {
     this.pushTranscript('caller', userText);
 
     // No AI configured: fail safe — offer to take a message deterministically.
-    if (!env.OPENAI_API_KEY || !this.systemPrompt) {
+    if (!openaiConfigured() || !this.systemPrompt) {
       if (this.pendingMessageTake && userText.trim().length >= 6) {
         this.pendingMessageTake = false;
         this.messageTaken = true;

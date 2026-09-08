@@ -88,6 +88,14 @@ test('team invitations need owner or admin, sensitive auth and the service role'
   assert.match(teamSource, /ONLY_OWNER_CAN_INVITE_ADMINS/);
   assert.match(teamSource, /inviteUserByEmail/);
   assert.match(teamSource, /team\.member_invited/);
+  // The invite must go through the real invite flow — an email with a setup
+  // link the invitee acts on — never createUser with email_confirm, which
+  // silently created a passwordless, unnotified account. And the user id must
+  // be read from the documented AuthResponse shape: a wrong read returned 502
+  // on every successful invite while leaving the auth user created.
+  assert.doesNotMatch(teamSource, /createUser\(/);
+  assert.doesNotMatch(teamSource, /email_confirm/);
+  assert.match(teamSource, /invite\.data\?\.user\?\.id \?\? null/);
 });
 
 test('automation steps are classified before anything executes', () => {

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { env } from '../env';
 import { issueCallToken, isReceptionistEngineAttached, simulateAdminTurn } from '../ai/receptionistCall';
 import { normalizeE164, twilioConfigured } from '../providers/twilio';
+import { openaiConfigured } from '../providers/openai';
 import { asyncRoute, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireSensitiveAuth, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
 import { twilioSignatureGuard } from './communications';
@@ -35,7 +36,7 @@ router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const { data, error } = await db.from('receptionist_profiles').select('*').eq('workspace_id', req.workspaceId!).maybeSingle();
   if (error) return res.status(500).json({ error: 'RECEPTIONIST_PROFILE_LOAD_FAILED' });
   res.json({ profile: data, readiness: {
-    twilio: twilioConfigured(), ai: Boolean(env.OPENAI_API_KEY), securePublicUrl: env.APP_URL.startsWith('https://'),
+    twilio: twilioConfigured(), ai: openaiConfigured(), securePublicUrl: env.APP_URL.startsWith('https://'),
     conversationRelay: isReceptionistEngineAttached(),
   }});
 }));
@@ -54,7 +55,7 @@ router.put('/', requireRole('owner','admin'), requireSensitiveAuth, validateBody
     // Fail closed: live answering unlocks only when every dependency is real.
     const missing: string[] = [];
     if (!twilioConfigured()) missing.push('Twilio number');
-    if (!env.OPENAI_API_KEY) missing.push('AI engine (OpenAI key)');
+    if (!openaiConfigured()) missing.push('AI engine (OpenAI key)');
     if (!env.APP_URL.startsWith('https://')) missing.push('public HTTPS address');
     if (!isReceptionistEngineAttached()) missing.push('conversation engine');
     if (missing.length) {

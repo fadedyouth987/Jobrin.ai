@@ -56,20 +56,13 @@ router.post('/invites', requireRole('owner', 'admin'), requireSensitiveAuth, val
     return res.status(403).json({ error: 'ONLY_OWNER_CAN_INVITE_ADMINS' });
   }
 
-  // Membership check runs through the caller's client so RLS applies.
-  const db = createUserClient(req.auth!.accessToken);
-  const { data: existing, error: existingError } = await db
-    .from('workspace_members')
-    .select('user_id')
-    .eq('workspace_id', req.workspaceId!);
-  if (existingError) return res.status(500).json({ error: 'TEAM_LIST_FAILED' });
-  void existing;
-
-  // Resolve the invitee's auth user, inviting them if they are brand new.
-  const invite = await supabaseAdmin.auth.admin.createUser({
-    email: req.body.email,
-    email_confirm: true,
-    user_metadata: { display_name: req.body.display_name || req.body.email.split('@')[0] },
+  // Resolve the invitee's auth user, sending them a real invite email if
+  // they are brand new. inviteUserByEmail both creates the user and emails a
+  // setup link, so the invitee sets their own password — unlike creating the
+  // auth user directly with auto-confirmation, which silently produced a
+  // passwordless, unnotified account nobody could sign in to.
+  const invite = await supabaseAdmin.auth.admin.inviteUserByEmail(req.body.email, {
+    data: { display_name: req.body.display_name || req.body.email.split('@')[0] },
   });
   if (invite.error) {
     if (/already been registered/i.test(invite.error.message)) {
@@ -77,8 +70,7 @@ router.post('/invites', requireRole('owner', 'admin'), requireSensitiveAuth, val
     }
     return res.status(502).json({ error: 'INVITE_SEND_FAILED' });
   }
-  const userId = (invite.data as { id?: string })?.id ?? null;
-  if (!userId) return res.status(502).json({ error: "INVITE_SEND_FAILED" });
+  const userId = invite.data?.user?.id ?? null;
   if (!userId) return res.status(502).json({ error: 'INVITE_SEND_FAILED' });
 
   const { data: members, error: memberReadError } = await supabaseAdmin

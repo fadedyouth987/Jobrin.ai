@@ -4,8 +4,11 @@ import { z } from 'zod';
 import { env } from '../env';
 import { asyncRoute, billingRateLimit, validateBody } from '../security';
 import { createUserClient, requireAuth, requireRole, requireSensitiveAuth, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
+import { stripe, stripeWebhookConfigured } from '../providers/stripe';
 
-export const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: '2026-07-29.dahlia' }) : null;
+// Re-exported for the invoice checkout route in operations.ts, which shares
+// the same singleton and the same configured gate.
+export { stripe };
 
 const PLAN_FEATURES: Record<'starter'|'growth'|'operator', Record<string, number | boolean>> = {
   starter: {
@@ -93,7 +96,7 @@ async function applySubscription(subscription: Stripe.Subscription) {
 
 export const stripeWebhookRouter = Router();
 stripeWebhookRouter.post('/webhook', express.raw({ type: 'application/json', limit: '1mb' }), asyncRoute(async (req, res) => {
-  if (!stripe || !env.STRIPE_WEBHOOK_SECRET) return res.status(503).json({ error: 'STRIPE_NOT_CONFIGURED' });
+  if (!stripe || !stripeWebhookConfigured()) return res.status(503).json({ error: 'STRIPE_NOT_CONFIGURED' });
   const signature = req.headers['stripe-signature'];
   if (!signature || Array.isArray(signature)) return res.status(400).json({ error: 'STRIPE_SIGNATURE_MISSING' });
 

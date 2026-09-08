@@ -32,4 +32,11 @@ export async function processBusinessBrainQueue(limit=5){
 
 async function complete(id:string){await supabaseAdmin.from('outbox_events').update({status:'delivered',delivered_at:new Date().toISOString(),last_error:null}).eq('id',id)}
 
-export function startBusinessBrainWorker(){const timer=setInterval(()=>{void processBusinessBrainQueue()},15_000);timer.unref();void processBusinessBrainQueue();return timer}
+export function startBusinessBrainWorker(){
+  // A failed tick (database down, transient Supabase error) must never become
+  // an unhandled rejection that kills the HTTP server: log it and let the
+  // next interval retry. The error still propagates from
+  // processBusinessBrainQueue itself, so the Cloudflare cron path (waitUntil)
+  // keeps its failure visibility.
+  const runSafely=()=>{void processBusinessBrainQueue().catch((error)=>{console.error(JSON.stringify({level:'error',component:'business_brain_worker',message:'Brain tick failed; retrying next interval',error:String((error as Error)?.message||error).slice(0,200)}))})};
+  const timer=setInterval(runSafely,15_000);timer.unref();runSafely();return timer}

@@ -39,6 +39,13 @@ router.post('/', requireRole('owner', 'admin', 'manager', 'staff'), validateBody
 
 router.patch('/:id', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(assetSchema.partial()), asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
+  // Retargeting the customer must not cross tenants: the row's own workspace
+  // RLS policy passes even when customer_id points at another workspace's
+  // customer, so the new reference is validated exactly like POST does.
+  if (req.body.customer_id) {
+    const { data: customer } = await db.from('customers').select('id').eq('workspace_id', req.workspaceId!).eq('id', req.body.customer_id).is('deleted_at', null).maybeSingle();
+    if (!customer) return res.status(404).json({ error: 'CUSTOMER_NOT_FOUND' });
+  }
   const { data, error } = await db.from('customer_assets').update({ ...req.body, updated_at: new Date().toISOString() })
     .eq('workspace_id', req.workspaceId!).eq('id', req.params.id).select('*').maybeSingle();
   if (error) return res.status(400).json({ error: 'ASSET_UPDATE_FAILED', message: error.message });

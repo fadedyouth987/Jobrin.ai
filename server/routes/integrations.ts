@@ -1,14 +1,16 @@
 import { Router } from 'express';
 import { asyncRoute } from '../security';
-import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireSensitiveAuth, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
+import { requireActiveSubscription, requireAuth, requireRole, requireSensitiveAuth, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
 import { requireTwilioConfig, twilioConfigured } from '../providers/twilio';
 
 const router = Router();
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('crm.core'));
 
 router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
-  const db = createUserClient(req.auth!.accessToken);
-  const { data, error } = await db.from('integrations').select('id,provider,status,external_account_id,scopes,last_success_at,last_error_at,error_code,connected_at,updated_at').eq('workspace_id', req.workspaceId!).order('provider');
+  // SELECT on `integrations` is server-only (migration 0005 revoked it from
+  // authenticated), so the list is read through the admin client, scoped to
+  // the caller's workspace — the user client fails here with 42501.
+  const { data, error } = await supabaseAdmin.from('integrations').select('id,provider,status,external_account_id,scopes,last_success_at,last_error_at,error_code,connected_at,updated_at').eq('workspace_id', req.workspaceId!).order('provider');
   if (error) return res.status(500).json({ error: 'INTEGRATION_LIST_FAILED' });
   res.json({ integrations: data ?? [] });
 }));

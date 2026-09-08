@@ -5,6 +5,7 @@ import { processBusinessBrainQueue } from './server/ai/businessBrainWorker';
 import { processAutomationRuns } from './server/automation/runner';
 import { markReceptionistEngineAttached, ReceptionistSession, verifyCallToken } from './server/ai/receptionistCall';
 import { ReceptionistCallDO } from './server/ai/receptionistDO';
+import { openaiConfigured } from './server/providers/openai';
 
 export { ReceptionistCallDO };
 
@@ -56,7 +57,7 @@ export default {
     // Skip queue work when the service role is absent instead of throwing on
     // every cron tick — the workers stay fail-closed but silent.
     const jobs: Promise<unknown>[] = [];
-    if (env.SUPABASE_SERVICE_ROLE_KEY && env.OPENAI_API_KEY) jobs.push(processBusinessBrainQueue());
+    if (env.SUPABASE_SERVICE_ROLE_KEY && openaiConfigured()) jobs.push(processBusinessBrainQueue());
     if (env.SUPABASE_SERVICE_ROLE_KEY) jobs.push(processAutomationRuns());
     if (jobs.length) {
       // The queues use atomic claims and idempotency keys, so Cloudflare's

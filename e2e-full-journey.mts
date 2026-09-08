@@ -24,7 +24,9 @@ async function main() {
 
   // 1. Signup via Admin API (bypasses email confirmation and rate limits)
   const testEmail = `e2e-final-${Date.now()}@gmail.com`;
-  const testPassword = '***';
+  // Supabase requires at least 6 characters; this account is throwaway E2E
+  // scaffolding, created and used only by this script.
+  const testPassword = 'E2e-Journey-2026!';
   const supaUrl = process.env.SUPABASE_URL;
   const supaKey = process.env.SUPABASE_ANON_KEY;
   const adminKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -201,8 +203,9 @@ async function main() {
   const activate = await api('POST', `/api/intelligence/automations/${autoId}/status`, { status: 'active' }, token, w);
   log('activate automation', activate.status === 200 ? 'PASS' : 'FAIL');
 
-  // 28. Team invites (needs service-role which IS configured)
-  const invite = await api('POST', '/api/team/invites', { email: `member-${Date.now()}@example.com`, role: 'manager' }, token, w);
+  // 28. Team invites (needs service-role which IS configured). gmail.com per
+  // commit e16f82f — Supabase blocks signup on example.com.
+  const invite = await api('POST', '/api/team/invites', { email: `member-${Date.now()}@gmail.com`, role: 'manager' }, token, w);
   log('team invite', invite.status === 201 ? 'PASS' : invite.status === 409 ? 'EXPECTED' : 'FAIL', `${invite.status} ${invite.payload?.error || ''}`);
 
   // 29. Assets
