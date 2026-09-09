@@ -205,6 +205,126 @@ router.delete('/jobs/:id/materials/:materialId', requireRole('owner', 'admin', '
   res.json({ ok: true });
 }));
 
+// ---------- Workspace time & materials log ----------
+// Cross-job view of every logged hour and material so owners can see who
+// worked what, when, and what it cost — without opening each job.
+router.get('/time-materials', requireRole('owner', 'admin', 'manager', 'staff'), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const [timeResult, materialResult] = await Promise.all([
+    db.from('job_time_entries').select('id,job_id,started_at,ended_at,break_minutes,notes,created_at,jobs(id,job_number,title,status)').eq('workspace_id', req.workspaceId!).order('created_at', { ascending: false }).limit(200),
+    db.from('job_materials').select('id,job_id,description,supplier,quantity,unit_cost_cents,unit_price_cents,created_at,jobs(id,job_number,title,status)').eq('workspace_id', req.workspaceId!).order('created_at', { ascending: false }).limit(200),
+  ]);
+  const readError = timeResult.error || materialResult.error;
+  if (readError) return res.status(500).json({ error: 'TIME_MATERIALS_LIST_FAILED', message: readError.message });
+  res.json({ timeEntries: timeResult.data ?? [], materials: materialResult.data ?? [] });
+}));
+
+// ---------- Recurring jobs & service agreements ----------
+// service_agreements/technician_profiles member write policies only arrive in
+// migration 0024; until it is applied these routes use the admin client with
+// explicit workspace scoping (same trusted-server pattern as materials delete).
+
+const AGREEMENT_CADENCES = ['weekly', 'fortnightly', 'monthly', 'quarterly', 'half_yearly', 'annual'] as const;
+const CADENCE_DAYS: Partial<Record<typeof AGREEMENT_CADENCES[number], number>> = { weekly: 7, fortnightly: 14 };
+const CADENCE_MONTHS: Partial<Record<typeof AGREEMENT_CADENCES[number], number>> = { monthly: 1, quarterly: 3, half_yearly: 6, annual: 12 };
+
+function advanceCadence(from: Date, cadence: string): Date {
+  const days = CADENCE_DAYS[cadence as keyof typeof CADENCE_DAYS];
+  if (days) return new Date(from.getTime() + days * 86_400_000);
+  const next = new Date(from);
+  next.setMonth(next.getMonth() + (CADENCE_MONTHS[cadence as keyof typeof CADENCE_MONTHS] ?? 1));
+  return next;
+}
+
+router.get('/service-agreements', requireRole('owner', 'admin', 'manager', 'staff'), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const { data, error } = await supabaseAdmin.from('service_agreements')
+    .select('id,customer_id,customers(display_name),service_id,services(name),name,status,cadence,price_cents,next_service_at,starts_at,ends_at,created_at,updated_at')
+    .eq('workspace_id', req.workspaceId!).order('created_at', { ascending: false }).limit(300);
+  if (error) return res.status(500).json({ error: 'AGREEMENT_LIST_FAILED', message: error.message });
+  res.json({ agreements: data ?? [] });
+}));
+
+router.post('/service-agreements', requireRole('owner', 'admin', 'manager'), validateBody(z.object({
+  customer_id: z.string().uuid(),
+  service_id: z.string().uuid().nullable().optional(),
+  name: z.string().trim().min(2).max(200),
+  cadence: z.enum(AGREEMENT_CADENCES),
+  price_cents: z.number().int().min(0).max(100_000_000).default(0),
+  status: z.enum(['draft', 'active']).default('draft'),
+  starts_at: z.string().datetime().nullable().optional(),
+  next_service_at: z.string().datetime().nullable().optional(),
+  notes: z.string().trim().max(2000).default(''),
+})), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const { data: customer, error: customerError } = await supabaseAdmin.from('customers').select('id').eq('workspace_id', req.workspaceId!).eq('id', req.body.customer_id).maybeSingle();
+  if (customerError) return res.status(500).json({ error: 'CUSTOMER_READ_FAILED' });
+  if (!customer) return res.status(404).json({ error: 'CUSTOMER_NOT_FOUND' });
+  if (req.body.service_id) {
+    const { data: service, error: serviceError } = await supabaseAdmin.from('services').select('id').eq('workspace_id', req.workspaceId!).eq('id', req.body.service_id).maybeSingle();
+    if (serviceError) return res.status(500).json({ error: 'SERVICE_READ_FAILED' });
+    if (!service) return res.status(404).json({ error: 'SERVICE_NOT_FOUND' });
+  }
+  const nextServiceAt = req.body.next_service_at ? new Date(req.body.next_service_at).toISOString()
+    : new Date(req.body.starts_at ?? Date.now()).toISOString();
+  const { data, error } = await supabaseAdmin.from('service_agreements').insert({
+    workspace_id: req.workspaceId!, customer_id: req.body.customer_id, service_id: req.body.service_id ?? null,
+    name: req.body.name, status: req.body.status, cadence: req.body.cadence,
+    price_cents: req.body.price_cents, starts_at: req.body.starts_at ?? new Date().toISOString().slice(0, 10),
+    next_service_at: nextServiceAt, terms: { notes: req.body.notes },
+  }).select('id,name,status,cadence,price_cents,next_service_at').single();
+  if (error) return res.status(400).json({ error: 'AGREEMENT_CREATE_FAILED', message: error.message });
+  await writeAudit(req, 'agreement.created', 'service_agreement', data.id, { name: req.body.name, cadence: req.body.cadence });
+  res.status(201).json({ agreement: data });
+}));
+
+router.patch('/service-agreements/:id', requireRole('owner', 'admin', 'manager'), validateBody(z.object({
+  name: z.string().trim().min(2).max(200).optional(),
+  status: z.enum(['draft', 'active', 'paused', 'cancelled', 'expired']).optional(),
+  cadence: z.enum(AGREEMENT_CADENCES).optional(),
+  price_cents: z.number().int().min(0).max(100_000_000).optional(),
+  next_service_at: z.string().datetime().optional(),
+  notes: z.string().trim().max(2000).optional(),
+})), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const { data: existing, error: readError } = await supabaseAdmin.from('service_agreements').select('id,terms').eq('workspace_id', req.workspaceId!).eq('id', req.params.id).maybeSingle();
+  if (readError) return res.status(500).json({ error: 'AGREEMENT_READ_FAILED' });
+  if (!existing) return res.status(404).json({ error: 'AGREEMENT_NOT_FOUND' });
+  const { notes, ...fields } = req.body;
+  const { data, error } = await supabaseAdmin.from('service_agreements').update({
+    ...fields,
+    ...(notes !== undefined ? { terms: { ...(existing.terms ?? {}), notes } } : {}),
+    updated_at: new Date().toISOString(),
+  }).eq('workspace_id', req.workspaceId!).eq('id', req.params.id)
+    .select('id,name,status,cadence,price_cents,next_service_at').single();
+  if (error || !data) return res.status(400).json({ error: 'AGREEMENT_UPDATE_FAILED', message: error?.message });
+  await writeAudit(req, 'agreement.updated', 'service_agreement', data.id, { fields: Object.keys(fields), status: req.body.status });
+  res.json({ agreement: data });
+}));
+
+router.post('/service-agreements/:id/generate', requireRole('owner', 'admin', 'manager'), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const { data: agreement, error: readError } = await supabaseAdmin.from('service_agreements')
+    .select('id,customer_id,service_id,name,status,cadence,price_cents,next_service_at,terms')
+    .eq('workspace_id', req.workspaceId!).eq('id', req.params.id).maybeSingle();
+  if (readError) return res.status(500).json({ error: 'AGREEMENT_READ_FAILED' });
+  if (!agreement) return res.status(404).json({ error: 'AGREEMENT_NOT_FOUND' });
+  if (agreement.status !== 'active') return res.status(409).json({ error: 'AGREEMENT_NOT_ACTIVE', status: agreement.status });
+  const scheduledStart = new Date(agreement.next_service_at ?? Date.now());
+  if (Number.isNaN(scheduledStart.getTime())) return res.status(409).json({ error: 'AGREEMENT_NEXT_SERVICE_INVALID' });
+  const scheduledEnd = new Date(scheduledStart.getTime() + 2 * 3_600_000);
+  const db = createUserClient(req.auth!.accessToken);
+  const { data: job, error: jobError } = await db.from('jobs').insert({
+    workspace_id: req.workspaceId!, customer_id: agreement.customer_id, service_id: agreement.service_id ?? null,
+    title: agreement.name, description: `Generated from service agreement "${agreement.name}" (${agreement.cadence}).`,
+    scheduled_start: scheduledStart.toISOString(), scheduled_end: scheduledEnd.toISOString(),
+  }).select('id,job_number,title,scheduled_start').single();
+  if (jobError) return res.status(400).json({ error: 'AGREEMENT_JOB_CREATE_FAILED', message: jobError.message });
+  const { data: updated, error: updateError } = await supabaseAdmin.from('service_agreements')
+    .update({ next_service_at: advanceCadence(scheduledStart, agreement.cadence).toISOString(), updated_at: new Date().toISOString() })
+    .eq('workspace_id', req.workspaceId!).eq('id', agreement.id)
+    .select('id,name,status,cadence,price_cents,next_service_at').single();
+  if (updateError || !updated) return res.status(500).json({ error: 'AGREEMENT_SCHEDULE_UPDATE_FAILED', message: updateError?.message });
+  await writeAudit(req, 'agreement.job_generated', 'service_agreement', agreement.id, { jobId: job.id, jobNumber: job.job_number });
+  res.status(201).json({ job, agreement: updated });
+}));
+
 // ---------- Field Completion Pack ----------
 
 // Photos: upload via base64 to Supabase Storage (vantory-assets bucket)

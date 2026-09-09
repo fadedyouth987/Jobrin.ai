@@ -17,6 +17,7 @@ import {
 } from './AppPages';
 import { HiringPage } from './HiringPage';
 import { CustomerDetailPage, JobDetailPage } from './OperationalDetailPages';
+import { RecurringJobsPage, TimeMaterialsLogPage } from './FieldOpsPages';
 import { SchedulePage } from './SchedulePage';
 import { BusinessBrainPage } from './BusinessBrainPage';
 import { AssetsPage } from './AssetsPage';
@@ -44,7 +45,6 @@ const groups: NavGroup[] = [
   ]},
   { label:'Jobs', items:[
     ['/app/jobs','Jobs',FileCheck2],
-    ['/app/coming-soon/job-checklists','Job checklists & badges',ClipboardList,true],
   ]},
   { label:'Quotes & Invoices', items:[
     ['/app/quotes','Quotes',FileText],
@@ -53,10 +53,10 @@ const groups: NavGroup[] = [
     ['/app/coming-soon/pdf-documents','PDF documents',FileText,true],
   ]},
   { label:'Field Operations', items:[
-    ['/app/coming-soon/time-materials','Time & Materials log',Clock3,true],
+    ['/app/time-materials','Time & Materials log',Clock3],
     ['/app/coming-soon/checklists-forms','Checklists & forms',ClipboardList,true],
     ['/app/assets','Assets & service history',Package],
-    ['/app/coming-soon/recurring-jobs','Recurring jobs & agreements',Repeat,true],
+    ['/app/recurring','Recurring jobs & agreements',Repeat],
     ['/app/coming-soon/supplier-purchasing','Supplier purchasing',Package,true],
   ]},
   { label:'AI Admin', items:[
@@ -76,7 +76,6 @@ const groups: NavGroup[] = [
     ['/app/marketing','Marketing SMS',MessageSquareMore],
     ['/app/reviews','Reviews',Star],
     ['/app/coming-soon/customer-portal','Customer portal',Globe,true],
-    ['/app/coming-soon/review-automation','Automated review requests',Star,true],
   ]},
   { label:'Hiring', items:[['/app/hiring','Hiring',UserRoundPlus]] },
   { label:'Reports', items:[['/app/analytics','Reports & attribution',BarChart3]] },
@@ -186,6 +185,8 @@ function routePage(path:string) {
   if(path==='/app/customers')return <CustomersPage/>;
   if(path==='/app/schedule')return <SchedulePage/>;
   if(path==='/app/jobs')return <OperationsListPage kind="jobs"/>;
+  if(path==='/app/time-materials')return <TimeMaterialsLogPage/>;
+  if(path==='/app/recurring')return <RecurringJobsPage/>;
   if(path==='/app/quotes')return <OperationsListPage kind="quotes"/>;
   if(path==='/app/invoices')return <OperationsListPage kind="invoices"/>;
   if(path==='/app/payments')return <OperationsListPage kind="payments"/>;

@@ -309,35 +309,15 @@ export const COMING_SOON_FEATURES: Record<string, { title: string; eyebrow: stri
     description: 'See your crew on a live map, dispatch the closest available technician and give customers an automatic on-the-way text with a real ETA.',
     points: ['Live technician locations on a map', 'Smart dispatch suggestions by proximity and skills', 'Automatic on-the-way SMS with live ETA', 'Travel-time aware schedule adjustments'],
   },
-  'job-checklists': {
-    title: 'Job checklists & badges', eyebrow: 'Jobs',
-    description: 'Built-in checklists and job requirements so every job is done right the first time. Critical-information badges highlight hazards, access notes and customer instructions on every job card.',
-    points: ['Reusable checklist templates per service type', 'Required-items enforcement before a job can be completed', 'Critical-information badges on job cards and the schedule', 'Checklist completion stored with the job record'],
-  },
   'pdf-documents': {
     title: 'PDF quotes & invoices', eyebrow: 'Quotes & Invoices',
     description: 'Branded PDF versions of every quote and invoice, generated automatically and attached to emails — alongside the secure online links you already have.',
     points: ['Branded template with your logo and details', 'Automatic PDF attachment on emailed quotes and invoices', 'Stored permanently with the job record'],
   },
-  'time-materials': {
-    title: 'Time & Materials log', eyebrow: 'Field Operations',
-    description: 'A workspace-wide log of every technician hour and material across all jobs — who worked what, when, and what it cost.',
-    points: ['Filterable time log across all jobs and technicians', 'Materials ledger with supplier references', 'Job profitability at a glance'],
-  },
   'checklists-forms': {
     title: 'Checklists & forms', eyebrow: 'Field Operations',
     description: 'Custom checklists, safety forms and compliance documents completed on site, stored against the job and exportable as branded PDFs.',
     points: ['Custom checklist and form templates', 'Completed on any phone or tablet', 'Automatic PDF reports stored with the job'],
-  },
-  'customer-assets': {
-    title: 'Assets & service history', eyebrow: 'Field Operations',
-    description: 'Every customer asset — hot water systems, switchboards, aircons — with its own service history, warranty dates and next-service reminders.',
-    points: ['Asset register per customer', 'Full service history on every asset', 'Warranty and next-service tracking'],
-  },
-  'recurring-jobs': {
-    title: 'Recurring jobs & agreements', eyebrow: 'Field Operations',
-    description: 'Service agreements that automatically schedule recurring work — maintenance plans, filter changes, safety checks — with reminders before each visit.',
-    points: ['Weekly, monthly or custom service cycles', 'Automatic appointment generation with reminders', 'Agreement pricing that flows into invoices'],
   },
   'supplier-purchasing': {
     title: 'Supplier purchasing', eyebrow: 'Field Operations',
@@ -373,11 +353,6 @@ export const COMING_SOON_FEATURES: Record<string, { title: string; eyebrow: stri
     title: 'Customer self-service portal', eyebrow: 'Marketing & Reviews',
     description: 'Your customers log in to see their job history, quotes and invoices, approve work and pay — everything customer-facing in one branded place.',
     points: ['Job history and quotes for every customer', 'Secure invoice payment', 'Booking requests and approval history'],
-  },
-  'review-automation': {
-    title: 'Automated review requests', eyebrow: 'Marketing & Reviews',
-    description: 'After completed jobs, review invitations send automatically with consent handling — and negative feedback routes to you privately before it ever goes public.',
-    points: ['Automatic requests after completed jobs', 'Consent and suppression checks enforced', 'Private feedback escalation before public posting'],
   },
   'accounting-sync': {
     title: 'Xero, MYOB & QuickBooks', eyebrow: 'Integrations',
