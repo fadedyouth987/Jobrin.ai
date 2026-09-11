@@ -82,4 +82,18 @@ router.get('/onboarding', requireAuth, requireWorkspace, asyncRoute(async (req: 
   res.json({ steps: data ?? [] });
 }));
 
+router.post('/onboarding/:step', requireAuth, requireWorkspace, requireRole('owner','admin','manager'), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const parsed = z.enum(['operator','billing','activation']).safeParse(req.params.step);
+  if (!parsed.success) return res.status(400).json({ error: 'INVALID_ONBOARDING_STEP' });
+  const db = createUserClient(req.auth!.accessToken);
+  const now = new Date().toISOString();
+  const { error } = await db.from('onboarding_progress').upsert({
+    workspace_id: req.workspaceId!, step_key: parsed.data, status: 'complete',
+    completed_at: now, updated_at: now,
+  });
+  if (error) return res.status(500).json({ error: 'ONBOARDING_PROGRESS_SAVE_FAILED' });
+  await writeAudit(req, `onboarding.${parsed.data}_completed`, 'workspace', req.workspaceId!);
+  res.json({ completed: parsed.data });
+}));
+
 export default router;

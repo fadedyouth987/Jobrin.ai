@@ -1,6 +1,7 @@
-import {supabaseAdmin} from '../supabase';
+import {consumeWorkspaceUsageForWorkspace,supabaseAdmin} from '../supabase';
 import {extractMemoryCandidates} from './openaiResponses';
 import {decideMemoryStatus,MEMORY_RULE_VERSION} from './memoryPolicy';
+import {openaiConfigured} from '../providers/openai';
 
 let running=false;
 export async function processBusinessBrainQueue(limit=5){
@@ -14,6 +15,8 @@ export async function processBusinessBrainQueue(limit=5){
         const feedbackEventId=String((event.payload as any)?.feedbackEventId||'');const{data:feedback}=await supabaseAdmin.from('ai_feedback_events').select('*').eq('workspace_id',event.workspace_id).eq('id',feedbackEventId).maybeSingle();if(!feedback)throw new Error('FEEDBACK_EVENT_NOT_FOUND');
         if(['do_not_learn','one_off'].includes(feedback.learning_intent)){await complete(event.id);continue;}
         const{data:existing}=await supabaseAdmin.from('business_memories').select('id,summary').eq('workspace_id',event.workspace_id).in('status',['candidate','active','challenged']).limit(50);
+        if(!openaiConfigured())throw new Error('OPENAI_NOT_CONFIGURED');
+        const allowance=await consumeWorkspaceUsageForWorkspace(event.workspace_id,'usage.ai_actions',1,`usage.ai_actions:brain:${event.id}`);if(!allowance.allowed)throw new Error('AI_ACTION_LIMIT_REACHED');
         const extraction=await extractMemoryCandidates({eventKey:feedback.event_key,proposal:feedback.proposal,finalValue:feedback.final_value,learningIntent:feedback.learning_intent,existingSummaries:existing??[]});
         if(!extraction.configured)throw new Error('OPENAI_NOT_CONFIGURED');
         for(const candidate of extraction.candidates){
@@ -23,6 +26,7 @@ export async function processBusinessBrainQueue(limit=5){
           await supabaseAdmin.from('memory_evidence').insert({workspace_id:event.workspace_id,memory_id:memory.id,feedback_event_id:feedback.id,source_type:feedback.resource_type,source_id:feedback.resource_id,observed_value:feedback.final_value??feedback.proposal,weight:1,explicitly_confirmed:false,event_at:feedback.occurred_at});
           await supabaseAdmin.from('memory_promotion_decisions').insert({workspace_id:event.workspace_id,memory_id:memory.id,from_status:'candidate',to_status:decision.status,rule_key:decision.ruleKey,rule_version:MEMORY_RULE_VERSION,inputs:{sampleCount:1,distinctRecords:1,contradictions:candidate.conflictsWith},reason:decision.reason,actor_type:'deterministic_worker'});
         }
+        await supabaseAdmin.from('ai_actions').insert({workspace_id:event.workspace_id,requested_by:'business_brain',actor_type:'memory_worker',tool_name:'admin.business_brain.extract',risk_level:'low',input:{eventKey:feedback.event_key},output:{candidateCount:extraction.candidates.length,providerUsage:extraction.usage},approval_required:false,status:'completed',model:extraction.model,prompt_version:feedback.prompt_version||'business-brain-v1',completed_at:new Date().toISOString()});
         await complete(event.id);processed++;
       }catch(error:any){const attempts=Number(event.attempts||0)+1;const dead=attempts>=5;await supabaseAdmin.from('outbox_events').update({status:dead?'dead_letter':'failed',last_error:String(error?.message||'MEMORY_EXTRACTION_FAILED').slice(0,1000),next_attempt_at:new Date(Date.now()+Math.min(3600,30*2**attempts)*1000).toISOString()}).eq('id',event.id);}
     }

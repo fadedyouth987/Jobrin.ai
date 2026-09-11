@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { buildSystemPrompt, issueCallToken, verifyCallToken, ReceptionistSession, type CallContext } from '../server/ai/receptionistCall';
+import { ADMIN_MODES, JOBRIN_ADMIN_SCOPE, buildSystemPrompt, issueCallToken, verifyCallToken, ReceptionistSession, type CallContext } from '../server/ai/receptionistCall';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const source = (relative: string) => readFileSync(join(here, '..', relative), 'utf8');
@@ -77,4 +77,60 @@ test('the engine is attached in both runtimes and the voice webhook signs call t
   assert.match(routeSource, /isReceptionistEngineAttached\(\)/);
   assert.match(routeSource, /RECEPTIONIST_NOT_READY/);
   assert.match(routeSource, /twilioSignatureGuard\('\/api\/twilio\/voice'\)/);
+});
+
+test('signed-in AI Admin departments fail closed without asking for caller details', async () => {
+  const { env } = await import('../server/env');
+  const originalKey = env.OPENAI_API_KEY;
+  env.OPENAI_API_KEY = '';
+  try {
+    for (const mode of ADMIN_MODES.filter((item) => item !== 'receptionist')) {
+      const session = new ReceptionistSession({ workspaceId: context.workspaceId, callSid: `preview-${mode}`, mode });
+      session.context = context;
+      session.systemPrompt = buildSystemPrompt(context, mode);
+      const result = await session.handleUserText('Complete this administrative task.');
+      assert.equal(result.configured, false);
+      assert.equal(result.messageTaken, false);
+      assert.match(result.reply, /OpenAI provider is not ready/);
+      assert.match(result.reply, /No draft was produced and no action was taken/);
+      assert.doesNotMatch(result.reply, /best number to reach you/i);
+    }
+  } finally {
+    env.OPENAI_API_KEY = originalKey;
+  }
+});
+
+test('every AI Admin department understands Jobrin and keeps consequential work controlled', () => {
+  assert.match(JOBRIN_ADMIN_SCOPE, /lead or enquiry.*customer.*job.*quote.*invoice.*payment.*review/s);
+  assert.match(JOBRIN_ADMIN_SCOPE, /integer cents in AUD/);
+  assert.match(JOBRIN_ADMIN_SCOPE, /Never claim a record was created, sent, booked, paid, refunded or changed/);
+  const expectedHat = {
+    receptionist: /RECEPTIONIST hat/,
+    finance: /FINANCE hat/,
+    sales: /SALES & LEADS hat/,
+    marketing: /MARKETING hat/,
+    support: /CUSTOMER SUPPORT hat/,
+  } as const;
+  for (const mode of ADMIN_MODES) {
+    const prompt = buildSystemPrompt(context, mode);
+    assert.match(prompt, expectedHat[mode]);
+    assert.match(prompt, /Jobrin\.ai is a workspace-isolated operations platform/);
+    assert.match(prompt, /human approval/);
+    assert.match(prompt, /Never invent prices/);
+  }
+  assert.match(buildSystemPrompt(context, 'finance'), /do not provide accounting or tax advice/);
+  assert.match(buildSystemPrompt(context, 'sales'), /Never promise prices or availability/);
+  assert.match(buildSystemPrompt(context, 'marketing'), /Never contact customers directly/);
+  assert.match(buildSystemPrompt(context, 'support'), /if the approved knowledge does not cover it, say so/);
+});
+
+test('model-assisted AI Admin work is metered idempotently and logged with provider usage', () => {
+  const engine = source('server/ai/receptionistCall.ts');
+  assert.match(engine, /usage\.ai_actions/);
+  assert.match(engine, /recordModelTurn/);
+  assert.match(engine, /providerUsage/);
+  assert.match(engine, /callSid.*turnNumber/s);
+  const brain = source('server/ai/businessBrainWorker.ts');
+  assert.ok(brain.indexOf('openaiConfigured()') < brain.indexOf("'usage.ai_actions'"));
+  assert.match(brain, /providerUsage:extraction\.usage/);
 });

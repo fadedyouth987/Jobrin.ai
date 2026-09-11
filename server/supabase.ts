@@ -139,23 +139,34 @@ export async function consumeWorkspaceUsage(
   req: AuthenticatedRequest,
   metricKey: string,
   quantity = 1,
+  idempotencyKey?: string,
 ): Promise<{ allowed: boolean; used?: number; limit?: number }> {
   if (!req.workspaceId || !req.requestId) return { allowed: false };
+  const key = idempotencyKey || String(req.header('idempotency-key') || req.requestId);
+  return consumeWorkspaceUsageForWorkspace(req.workspaceId, metricKey, quantity, `${metricKey}:${key}`);
+}
+
+export async function consumeWorkspaceUsageForWorkspace(
+  workspaceId: string,
+  metricKey: string,
+  quantity: number,
+  idempotencyKey: string,
+): Promise<{ allowed: boolean; used?: number; limit?: number }> {
   const { data: entitlement, error } = await supabaseAdmin
     .from('subscription_entitlements')
     .select('enabled,limit_value')
-    .eq('workspace_id', req.workspaceId)
+    .eq('workspace_id', workspaceId)
     .eq('feature_key', metricKey)
     .maybeSingle();
   if (error || !entitlement?.enabled || entitlement.limit_value == null) return { allowed: false };
 
   const limit = Number(entitlement.limit_value);
   const { data, error: consumeError } = await supabaseAdmin.rpc('consume_workspace_usage', {
-    target_workspace: req.workspaceId,
+    target_workspace: workspaceId,
     target_metric: metricKey,
     target_quantity: quantity,
     target_limit: limit,
-    target_idempotency_key: `${metricKey}:${crypto.randomUUID()}`,
+    target_idempotency_key: idempotencyKey.slice(0, 240),
   });
   if (consumeError) {
     if (/USAGE_LIMIT_EXCEEDED/i.test(consumeError.message)) return { allowed: false, limit };

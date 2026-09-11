@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '../supabase';
+import { supabaseAdmin, writeNotification } from '../supabase';
 import { toolByName, requiresApproval, canExecute } from '../ai/toolRegistry';
 
 // Automation executor: processes the automation_runs queue that the Business
@@ -13,9 +13,23 @@ let running = false;
 
 export type StepClass = 'execute' | 'approval' | 'denied';
 
+// Only tools with a complete, tested executor belong in an automation. The
+// wider registry also describes preview and approval-gated product direction;
+// advertising those as runnable would create jobs that can never finish.
+export const AUTOMATION_EXECUTABLE_TOOLS = new Set([
+  'customer.lookup',
+  'quote.draft',
+  'review.request',
+  'business.report',
+]);
+
+export function isAutomationExecutable(toolName: string) {
+  return AUTOMATION_EXECUTABLE_TOOLS.has(toolName);
+}
+
 export function classifyAutomationStep(toolName: string): { stepClass: StepClass; risk: string } {
   const tool = toolByName(toolName);
-  if (!tool || tool.risk === 'prohibited') return { stepClass: 'denied', risk: 'prohibited' };
+  if (!tool || tool.risk === 'prohibited' || !isAutomationExecutable(toolName)) return { stepClass: 'denied', risk: 'prohibited' };
   if (tool.risk === 'automatic') return { stepClass: 'execute', risk: 'low' };
   // review.request only stages an internal queued record — nothing contacts a
   // customer until delivery providers are configured and the owner sends it.
@@ -100,7 +114,6 @@ export async function processAutomationRuns(limit = 5) {
       .select('id,workspace_id,automation_id,attempt_count,max_attempts,state')
       .in('status', ['queued', 'failed'])
       .lte('next_attempt_at', new Date().toISOString())
-      .neq('state->>exhausted', 'true')
       .order('created_at')
       .limit(limit);
     if (error) throw new Error('AUTOMATION_RUN_QUEUE_READ_FAILED');
@@ -144,6 +157,12 @@ export async function processAutomationRuns(limit = 5) {
               resource_type: 'automation_step', resource_id: run.id,
               reason: `Automation step "${step.tool}" needs human approval before it runs.`,
             });
+            void writeNotification(
+              run.workspace_id, 'automation.approval_needed',
+              'An automation is waiting for your approval',
+              `Automation step "${step.tool}" needs a human decision before it runs.`,
+              'automation_step', run.id,
+            );
             results.push({ tool: step.tool, status: 'awaiting_approval', aiActionId: action?.id ?? null });
             waitingForApproval = true;
             continue;
@@ -175,7 +194,9 @@ export async function processAutomationRuns(limit = 5) {
           started_at: failedAt, completed_at: failedAt,
         }).then(() => undefined, () => undefined);
         await supabaseAdmin.from('automation_runs').update({
-          status: 'failed',
+          // Cancelled is terminal and excluded from future queue scans. The
+          // exhausted flag and last_error preserve the dead-letter reason.
+          status: exhausted ? 'cancelled' : 'failed',
           last_error: message.slice(0, 1000),
           next_attempt_at: new Date(Date.now() + backoffSeconds * 1000).toISOString(),
           state: exhausted ? { ...(run.state ?? {}), exhausted: true } : (run.state ?? {}),

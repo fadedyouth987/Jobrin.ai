@@ -12,11 +12,18 @@ const weekday = (name: number): BusinessHourRule => ({ weekday: name, opens_at: 
 const closed = (name: number): BusinessHourRule => ({ weekday: name, opens_at: null, closes_at: null, closed: true });
 
 test('booking slots respect business hours, duration and exclusions', () => {
-  // Monday 2026-09-07 is a Monday. Rules: Mon-Fri 7-5, weekend closed.
+  // Anchor the window to the next Sunday, strictly in the future: the slot
+  // generator filters out past instants, so a fixed historical date would make
+  // this test a time bomb that fails every Friday evening.
+  const now = new Date();
+  const anchor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  anchor.setUTCDate(anchor.getUTCDate() + (((7 - anchor.getUTCDay()) % 7) || 7));
   const rules = [weekday(1), weekday(2), weekday(3), weekday(4), weekday(5), closed(0), closed(6)];
-  const monday = new Date('2026-09-06T00:00:00Z'); // start counting from Sunday
-  const busy = [{ start: '2026-09-07T21:00:00.000Z', end: '2026-09-07T23:30:00.000Z' }]; // 7:30-10:00 ACST
-  const slots = generateBookingSlots(rules, 120, monday, busy, 'Australia/Adelaide', 7);
+  // A 2.5-hour busy block that starts inside the first business morning.
+  const busy = [
+    { start: new Date(anchor.getTime() + 21 * 3_600_000).toISOString(), end: new Date(anchor.getTime() + 23.5 * 3_600_000).toISOString() },
+  ];
+  const slots = generateBookingSlots(rules, 120, anchor, busy, 'Australia/Adelaide', 7);
   assert.ok(slots.length > 0);
   // Every slot lands on a weekday in Adelaide time (no Sat/Sun bookings).
   const weekdays: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
@@ -25,8 +32,10 @@ test('booking slots respect business hours, duration and exclusions', () => {
     const day = weekdays[label];
     assert.ok([1, 2, 3, 4, 5].includes(day), `slot on weekday ${day} (${label})`);
   }
-  // The busy range (7:30-10:00 ACST Monday) must not produce a slot that overlaps.
-  const overlapping = slots.filter((slot) => new Date(slot.start) < new Date('2026-09-07T23:30:00.000Z') && new Date(slot.end) > new Date('2026-09-07T21:00:00.000Z'));
+  // The busy block must not produce a slot that overlaps it.
+  const busyStart = new Date(busy[0].start);
+  const busyEnd = new Date(busy[0].end);
+  const overlapping = slots.filter((slot) => new Date(slot.start) < busyEnd && new Date(slot.end) > busyStart);
   assert.equal(overlapping.length, 0);
   // Slots are never shorter than the service duration.
   for (const slot of slots) {

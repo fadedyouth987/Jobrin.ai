@@ -327,7 +327,7 @@ router.post('/campaigns/:id/send', requireActiveSubscription('campaigns.revenue'
       await supabaseAdmin.from('sms_campaign_recipients').update({ status: permission, updated_at: new Date().toISOString() }).eq('id', recipient.id);
       results.skipped += 1; continue;
     }
-    const usage = await consumeWorkspaceUsage(req, 'usage.sms');
+    const usage = await consumeWorkspaceUsage(req, 'usage.sms', 1, `campaign-recipient:${recipient.id}`);
     if (!usage.allowed) {
       await supabaseAdmin.from('sms_campaign_recipients').update({ status: 'skipped', error_code: 'SMS_LIMIT_REACHED', updated_at: new Date().toISOString() }).eq('id', recipient.id);
       results.skipped += 1; continue;

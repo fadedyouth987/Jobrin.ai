@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncRoute, validateBody } from '../security';
-import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest, writeAudit } from '../supabase';
+import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
 import { operatorTools, toolByName } from '../ai/toolRegistry';
+import { isAutomationExecutable } from '../automation/runner';
 
 const router = Router();
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('ai.basic'));
@@ -67,14 +68,17 @@ router.get('/ai-actions', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const { data, error } = await db.from('ai_actions').select('id,tool_name,risk_level,status,approval_required,error_code,cost_microunits,created_at,completed_at,customer_id,conversation_id').eq('workspace_id', req.workspaceId!).order('created_at',{ascending:false}).limit(300);
   if (error) return res.status(500).json({ error: 'AI_ACTION_LIST_FAILED' });
   // Tag each action with the department (specialist) that owns its tool.
-  const actions = (data ?? []).map((row: any) => ({ ...row, specialist: toolByName(row.tool_name)?.specialist ?? null }));
+  const actions = (data ?? []).map((row: any) => ({
+    ...row,
+    specialist: toolByName(row.tool_name)?.specialist ?? (/^admin\.(receptionist|finance|sales|marketing|support|business_brain)\./.exec(row.tool_name)?.[1] ?? null),
+  }));
   res.json({ actions });
 }));
 
 router.get('/capabilities', asyncRoute(async (_req: AuthenticatedRequest, res) => {
   res.json({
     policy: 'safe_autopilot',
-    tools: operatorTools.map(({ name, description, risk, specialist }) => ({ name, description, risk, specialist })),
+    tools: operatorTools.map(({ name, description, risk, specialist }) => ({ name, description, risk, specialist, automationReady: isAutomationExecutable(name) })),
     specialists: [
       {key:'receptionist',label:'AI receptionist',status:'setup_required'},
       {key:'triage',label:'Enquiry triage',status:'preview'},
@@ -104,8 +108,11 @@ const automationSchema=z.object({
 }).strict();
 
 router.post('/automations',requireRole('owner','admin','manager'),validateBody(automationSchema),asyncRoute(async(req:AuthenticatedRequest,res)=>{
-  const invalid=req.body.definition.steps.find((step:{tool:string})=>!operatorTools.some(tool=>tool.name===step.tool)||operatorTools.find(tool=>tool.name===step.tool)?.risk==='prohibited');
-  if(invalid)return res.status(400).json({error:'AUTOMATION_TOOL_NOT_ALLOWED',tool:invalid.tool});
+  const invalid=req.body.definition.steps.find((step:{tool:string,input:Record<string,unknown>})=>{
+    const tool=toolByName(step.tool);
+    return !tool||!isAutomationExecutable(step.tool)||!tool.schema.safeParse(step.input).success;
+  });
+  if(invalid)return res.status(400).json({error:'AUTOMATION_TOOL_NOT_READY_OR_INPUT_INVALID',tool:invalid.tool});
   const db=createUserClient(req.auth!.accessToken);
   const {data,error}=await db.from('automations').insert({...req.body,workspace_id:req.workspaceId!,created_by:req.auth!.userId,status:'draft'}).select('*').single();
   if(error)return res.status(400).json({error:'AUTOMATION_CREATE_FAILED',message:error.message});
@@ -122,7 +129,9 @@ router.post('/automations/:id/run',requireRole('owner','admin','manager'),asyncR
   const db=createUserClient(req.auth!.accessToken);const {data:automation}=await db.from('automations').select('id,status,retry_policy').eq('workspace_id',req.workspaceId!).eq('id',req.params.id).maybeSingle();
   if(!automation)return res.status(404).json({error:'AUTOMATION_NOT_FOUND'});if(automation.status!=='active')return res.status(409).json({error:'AUTOMATION_NOT_ACTIVE'});
   const key=`manual:${automation.id}:${req.requestId}`;const maxAttempts=Number((automation.retry_policy as any)?.maxAttempts||5);
-  const {data,error}=await db.from('automation_runs').insert({workspace_id:req.workspaceId!,automation_id:automation.id,idempotency_key:key,max_attempts:maxAttempts,state:{source:'manual',requestedBy:req.auth!.userId}}).select('*').single();
+  // Browser clients are intentionally read-only for worker-owned run records.
+  // This authenticated, role-checked route performs the internal queue write.
+  const {data,error}=await supabaseAdmin.from('automation_runs').insert({workspace_id:req.workspaceId!,automation_id:automation.id,idempotency_key:key,max_attempts:maxAttempts,state:{source:'manual',requestedBy:req.auth!.userId}}).select('*').single();
   if(error)return res.status(400).json({error:'AUTOMATION_QUEUE_FAILED',message:error.message});await writeAudit(req,'automation.run_queued','automation_run',data.id);res.status(202).json({run:data});
 }));
 

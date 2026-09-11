@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { env } from '../env';
 import { openaiConfigured } from '../providers/openai';
-import { supabaseAdmin, writeNotification } from '../supabase';
+import { consumeWorkspaceUsageForWorkspace, supabaseAdmin, writeNotification } from '../supabase';
 
 // The signed real-time conversation layer for the AI receptionist — and the
 // unified office-admin brain: one session engine, worn as different hats
@@ -75,6 +75,15 @@ export type AdminMode = 'receptionist' | 'finance' | 'sales' | 'marketing' | 'su
 
 export const ADMIN_MODES: AdminMode[] = ['receptionist', 'finance', 'sales', 'marketing', 'support'];
 
+export const JOBRIN_ADMIN_SCOPE = [
+  'Jobrin.ai is a workspace-isolated operations platform for Australian trade and service businesses.',
+  'Its record flow is lead or enquiry → customer → job → quote → accepted quote → invoice → payment → review and reporting.',
+  'Business profiles, approved knowledge, published services and live workspace records are the source of truth.',
+  'Never claim a record was created, sent, booked, paid, refunded or changed unless a Jobrin.ai tool result confirms that exact outcome.',
+  'Money is stored as integer cents in AUD. GST summaries are factual calculations from stored records, not accounting or tax advice.',
+  'Customer contact, financial commitments, refunds, permissions and other consequential actions require the applicable policy check or human approval.',
+].join('\n');
+
 export function isAdminMode(value: unknown): value is AdminMode {
   return typeof value === 'string' && ADMIN_MODES.includes(value as AdminMode);
 }
@@ -87,24 +96,25 @@ function modeInstructions(mode: AdminMode): string[] {
       return [
         'You are currently wearing the FINANCE hat of the office manager.',
         'Duties: watch overdue invoices, flag completed jobs that have not been invoiced yet, draft polite payment chasers, and summarise cash flow.',
-        'You may READ financial records and DRAFT chasers and summaries. You never send anything yourself — every draft is advisory until the owner sends it.',
+        'In this preview, use only figures the signed-in user deliberately supplies. Direct them to the deterministic Command Centre for exact workspace totals.',
+        'You may DRAFT chasers and summaries. You never send anything yourself, and you do not provide accounting or tax advice.',
       ];
     case 'sales':
       return [
         'You are currently wearing the SALES & LEADS hat of the office manager.',
         'Duties: triage new leads, draft first responses, chase stale enquiries, suggest which lead to contact first, and record what each lead wanted.',
-        'Drafts are advisory. Never promise prices or availability — propose and let the owner decide.',
+        'Use only enquiry details the signed-in user deliberately supplies. Drafts are advisory. Never promise prices or availability — propose and let the owner decide.',
       ];
     case 'marketing':
       return [
         'You are currently wearing the MARKETING hat of the office manager.',
-        'Duties: draft review responses, post-work recap posts, seasonal campaign ideas and service copy, grounded only in approved knowledge and completed jobs.',
+        'Duties: draft review responses, post-work recap posts, seasonal campaign ideas and service copy, grounded only in approved knowledge and details the signed-in user deliberately supplies.',
         'Everything you write is a draft for the owner. Never contact customers directly.',
       ];
     case 'support':
       return [
         'You are currently wearing the CUSTOMER SUPPORT hat of the office manager.',
-        'Duties: triage the inbox, draft grounded replies, and make sure no customer message goes unanswered.',
+        'Duties: help triage a message the signed-in user deliberately supplies and draft a grounded reply.',
         'Never invent facts — if the approved knowledge does not cover it, say so and flag it for the team.',
       ];
     default:
@@ -180,11 +190,14 @@ export function buildSystemPrompt(context: CallContext, mode: AdminMode = 'recep
     `Published services (you may describe these; never state a binding price or quote a total):`,
     services,
     ``,
+    `JOBRIN.AI ADMINISTRATION MODEL:`,
+    JOBRIN_ADMIN_SCOPE,
+    ``,
     `HARD RULES:`,
     `- Never invent prices, availability, policies, warranties or completed actions.`,
     `- Never take card details or payment information. Never process payments.`,
     `- Never give emergency, safety, legal or medical advice. For emergencies or urgent situations, tell the caller to hang up and dial emergency services if in danger, and offer to take a message for urgent follow-up.`,
-    `- If unsure, if the caller asks for a person, or for complaints/refunds/legal/financial matters: apologise, and either transfer to ${context.profile.transfer_number || 'the team'} or take a message.`,
+    `- In receptionist mode, if unsure, if the caller asks for a person, or for complaints/refunds/legal/financial matters: apologise, and either transfer to ${context.profile.transfer_number || 'the team'} or take a message. In signed-in admin modes, keep output advisory and escalate consequential decisions.`,
     `- Keep replies under three sentences unless reading back captured details.`,
     ...modeInstructions(mode),
   ].join('\n');
@@ -194,39 +207,9 @@ export function buildSystemPrompt(context: CallContext, mode: AdminMode = 'recep
 
 // Bounded and best-effort: no records simply means no section, never a guess.
 async function fetchModeData(workspaceId: string, mode: AdminMode): Promise<string | null> {
-  try {
-    if (mode === 'finance') {
-      const [invoices, jobs] = await Promise.all([
-        supabaseAdmin.from('invoices').select('invoice_number,balance_due_cents,due_at,status,customers(display_name)').eq('workspace_id', workspaceId).in('status', ['sent', 'viewed', 'part_paid', 'overdue']).gt('balance_due_cents', 0).order('due_at').limit(10),
-        supabaseAdmin.from('jobs').select('job_number,title,completed_at').eq('workspace_id', workspaceId).eq('status', 'completed').order('completed_at', { ascending: false }).limit(10),
-      ]);
-      const overdue = (invoices.data ?? []).map((row: any) => `Invoice #${row.invoice_number}: $${(Number(row.balance_due_cents) / 100).toFixed(2)} owed${row.due_at ? `, due ${new Date(row.due_at).toLocaleDateString('en-AU')}` : ''}`);
-      const uninvoiced = (jobs.data ?? []).map((row: any) => `Job #${row.job_number} "${row.title}" completed but not invoiced`);
-      const sections = [
-        overdue.length ? `Outstanding invoices (oldest due first):\n${overdue.join('\n')}` : 'No outstanding invoices.',
-        uninvoiced.length ? `Completed jobs not yet invoiced:\n${uninvoiced.join('\n')}` : '',
-      ].filter(Boolean);
-      return `CURRENT FINANCIAL SNAPSHOT (facts — never estimate):\n${sections.join('\n')}`;
-    }
-    if (mode === 'sales') {
-      const { data: leads } = await supabaseAdmin.from('leads').select('title,stage,source,estimated_value_cents,created_at,customers(display_name)').eq('workspace_id', workspaceId).in('stage', ['new', 'contacted', 'qualified', 'quote']).order('created_at', { ascending: false }).limit(10);
-      const rows = (leads ?? []).map((lead: any) => `${lead.title} — stage: ${lead.stage}, source: ${lead.source || 'unknown'}, ${lead.estimated_value_cents ? `${Math.round(lead.estimated_value_cents / 100)} AUD est, ` : ''}created ${new Date(lead.created_at).toLocaleDateString('en-AU')}`);
-      return rows.length ? `OPEN LEADS (facts):\n${rows.join('\n')}` : null;
-    }
-    if (mode === 'marketing') {
-      const { data: jobs } = await supabaseAdmin.from('jobs').select('job_number,title,completed_at,customers(display_name)').eq('workspace_id', workspaceId).eq('status', 'completed').order('completed_at', { ascending: false }).limit(5);
-      const rows = (jobs ?? []).map((job: any) => `${job.title} for ${job.customers?.display_name || 'a customer'} (completed ${job.completed_at ? new Date(job.completed_at).toLocaleDateString('en-AU') : 'recently'})`);
-      return rows.length ? `RECENT COMPLETED WORK (for recap drafts):\n${rows.join('\n')}` : null;
-    }
-    if (mode === 'support') {
-      const { data: conversations } = await supabaseAdmin.from('conversations').select('id,subject,last_message_at,customers(display_name)').eq('workspace_id', workspaceId).eq('status', 'open').order('last_message_at', { ascending: false, nullsFirst: false }).limit(10);
-      const rows = (conversations ?? []).map((c: any) => `${c.customers?.display_name || 'Customer'} — last activity ${c.last_message_at ? new Date(c.last_message_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : 'unknown'}`);
-      return rows.length ? `OPEN CONVERSATIONS (facts):\n${rows.join('\n')}` : null;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  void workspaceId;
+  if (mode === 'receptionist') return null;
+  return `PRIVACY BOUNDARY: No private workspace records are included in this model prompt. Use only approved business knowledge and details the signed-in user deliberately supplies in this conversation. For exact Jobrin.ai financial and operational figures, direct the user to the deterministic Command Centre report.`;
 }
 
 // ---------- Tools: side effects are scoped per hat ----------
@@ -253,6 +236,14 @@ const TAKE_MESSAGE_TOOL = {
 // caller). Advisory hats draft in chat — their output is the reply itself.
 function toolsForMode(mode: AdminMode): unknown[] {
   return mode === 'receptionist' ? [TAKE_MESSAGE_TOOL] : [];
+}
+
+function providerUnavailableReply(mode: AdminMode): string {
+  if (mode === 'receptionist') {
+    return `I'm sorry, I can't answer questions at the moment, but I can take a message for the team — what is the best number to reach you on?`;
+  }
+  const department = mode === 'sales' ? 'Sales & leads' : mode[0].toUpperCase() + mode.slice(1);
+  return `${department} AI is unavailable because the OpenAI provider is not ready. No draft was produced and no action was taken. Use Jobrin.ai's deterministic screens for exact records, or configure OpenAI under Integrations and try again.`;
 }
 
 // ---------- Persistence (best-effort, fail-closed without secrets) ----------
@@ -286,7 +277,10 @@ async function recordMessageTake(context: CallContext, fromNumber: string | null
   }
 }
 
-async function openaiChat(messages: Array<{ role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }>, tools: unknown[] = []): Promise<{ configured: boolean; message: { role: 'assistant'; content: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> } | null }> {
+type ProviderUsage = { promptTokens: number; completionTokens: number; totalTokens: number };
+type OpenAiTurn = { configured: boolean; message: { role: 'assistant'; content: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> } | null; usage?: ProviderUsage };
+
+async function openaiChat(messages: Array<{ role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }>, tools: unknown[] = []): Promise<OpenAiTurn> {
   if (!openaiConfigured()) return { configured: false, message: null };
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -297,7 +291,15 @@ async function openaiChat(messages: Array<{ role: string; content: string | null
   const payload: any = await response.json();
   const message = payload.choices?.[0]?.message;
   if (!message) throw new Error('OPENAI_CHAT_EMPTY');
-  return { configured: true, message: { role: 'assistant', content: message.content ?? null, tool_calls: message.tool_calls } };
+  return {
+    configured: true,
+    message: { role: 'assistant', content: message.content ?? null, tool_calls: message.tool_calls },
+    usage: {
+      promptTokens: Number(payload.usage?.prompt_tokens || 0),
+      completionTokens: Number(payload.usage?.completion_tokens || 0),
+      totalTokens: Number(payload.usage?.total_tokens || 0),
+    },
+  };
 }
 
 // ---------- The session ----------
@@ -312,6 +314,7 @@ export class ReceptionistSession {
   private history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
   readonly transcript: string[] = [];
   private pendingMessageTake = false;
+  private turnNumber = 0;
   messageTaken = false;
 
   constructor(options: { workspaceId: string; callSid: string; fromNumber?: string | null; history?: Array<{ role: 'user' | 'assistant'; content: string }>; mode?: AdminMode }) {
@@ -344,11 +347,40 @@ export class ReceptionistSession {
     if (this.transcript.length > 60) this.transcript.shift();
   }
 
+  private async recordModelTurn(status: 'completed' | 'failed' | 'denied', usage?: ProviderUsage, errorCode?: string) {
+    try {
+      await supabaseAdmin.from('ai_actions').insert({
+        workspace_id: this.workspaceId,
+        requested_by: this.mode === 'receptionist' ? 'receptionist' : 'signed_in_user',
+        actor_type: this.mode === 'receptionist' ? 'receptionist_voice' : 'admin_preview',
+        tool_name: `admin.${this.mode}.respond`,
+        risk_level: 'low',
+        input: { mode: this.mode },
+        output: usage ? { providerUsage: usage } : null,
+        approval_required: false,
+        status,
+        error_code: errorCode || null,
+        model: openaiConfigured() ? env.OPENAI_MODEL : null,
+        prompt_version: 'jobrin-admin-v2',
+        completed_at: new Date().toISOString(),
+      });
+    } catch {
+      // Usage enforcement remains authoritative if audit storage is unavailable.
+    }
+  }
+
   async handleUserText(userText: string): Promise<TurnResult> {
+    this.turnNumber += 1;
     this.pushTranscript('caller', userText);
 
-    // No AI configured: fail safe — offer to take a message deterministically.
+    // No AI configured: live calls offer a deterministic message-take. Signed-in
+    // admin hats report the unavailable provider and never pretend they acted.
     if (!openaiConfigured() || !this.systemPrompt) {
+      if (this.mode !== 'receptionist') {
+        const reply = providerUnavailableReply(this.mode);
+        this.pushTranscript('receptionist', reply);
+        return { reply, configured: false, messageTaken: false };
+      }
       if (this.pendingMessageTake && userText.trim().length >= 6) {
         this.pendingMessageTake = false;
         this.messageTaken = true;
@@ -368,6 +400,18 @@ export class ReceptionistSession {
       ...this.history.slice(-16).map((entry) => ({ role: entry.role, content: entry.content })),
       { role: 'user', content: userText },
     ];
+    const allowance = await consumeWorkspaceUsageForWorkspace(
+      this.workspaceId,
+      'usage.ai_actions',
+      1,
+      `usage.ai_actions:${this.callSid}:${this.turnNumber}`,
+    ).catch(() => ({ allowed: false }));
+    if (!allowance.allowed) {
+      const reply = `The monthly AI Admin action limit has been reached. Exact reports and manual Jobrin.ai workflows are still available.`;
+      await this.recordModelTurn('denied', undefined, 'AI_ACTION_LIMIT_REACHED');
+      this.pushTranscript('receptionist', reply);
+      return { reply, configured: false, messageTaken: false };
+    }
     let first;
     try {
       first = await openaiChat(messages, toolsForMode(this.mode));
@@ -376,8 +420,9 @@ export class ReceptionistSession {
       first = { configured: false, message: null };
     }
     if (!first.configured) {
-      this.pendingMessageTake = true;
-      const reply = `I'm sorry, I can't answer questions at the moment, but I can take a message for the team — what is the best number to reach you on?`;
+      await this.recordModelTurn('failed', undefined, 'OPENAI_UNAVAILABLE');
+      if (this.mode === 'receptionist') this.pendingMessageTake = true;
+      const reply = providerUnavailableReply(this.mode);
       this.pushTranscript('receptionist', reply);
       return { reply, configured: false, messageTaken: false };
     }
@@ -399,6 +444,12 @@ export class ReceptionistSession {
           second = { configured: false, message: null };
         }
         const reply = second.configured && second.message?.content ? second.message.content : `Thank you — I've passed your message to the team and they'll be in touch.`;
+        const combinedUsage = {
+          promptTokens: Number(first.usage?.promptTokens || 0) + Number(second.usage?.promptTokens || 0),
+          completionTokens: Number(first.usage?.completionTokens || 0) + Number(second.usage?.completionTokens || 0),
+          totalTokens: Number(first.usage?.totalTokens || 0) + Number(second.usage?.totalTokens || 0),
+        };
+        await this.recordModelTurn('completed', combinedUsage);
         this.history.push({ role: 'user', content: userText }, { role: 'assistant', content: reply });
         this.pushTranscript('receptionist', reply);
         return { reply, configured: true, messageTaken: true, note };
@@ -406,6 +457,7 @@ export class ReceptionistSession {
     }
 
     const reply = (assistantMessage.content || 'Could you say that again for me?').slice(0, 600);
+    await this.recordModelTurn('completed', first.usage);
     this.history.push({ role: 'user', content: userText }, { role: 'assistant', content: reply });
     this.pushTranscript('receptionist', reply);
     return { reply, configured: true, messageTaken: false };
@@ -427,9 +479,9 @@ export class ReceptionistSession {
 
 // ---------- Text-mode preview: the same engine, no phone required ----------
 
-export async function simulateAdminTurn(workspaceId: string, userText: string, history: Array<{ role: 'user' | 'assistant'; content: string }> = [], fromNumber: string | null = null, mode: AdminMode = 'receptionist'): Promise<{ reply: string; configured: boolean; messageTaken: boolean; profileFound: boolean; mode: AdminMode }> {
+export async function simulateAdminTurn(workspaceId: string, userText: string, history: Array<{ role: 'user' | 'assistant'; content: string }> = [], fromNumber: string | null = null, mode: AdminMode = 'receptionist', callId?: string): Promise<{ reply: string; configured: boolean; messageTaken: boolean; profileFound: boolean; mode: AdminMode }> {
   const context = await fetchCallContext(workspaceId);
-  const session = new ReceptionistSession({ workspaceId, callSid: `simulate-${crypto.randomUUID()}`, fromNumber, history, mode });
+  const session = new ReceptionistSession({ workspaceId, callSid: callId || `simulate-${crypto.randomUUID()}`, fromNumber, history, mode });
   await session.loadContext();
   const result = await session.handleUserText(userText);
   return { reply: result.reply, configured: result.configured, messageTaken: result.messageTaken, profileFound: Boolean(context), mode };
