@@ -103,10 +103,13 @@ test('automation steps are classified before anything executes', () => {
   assert.deepEqual(classifyAutomationStep('customer.lookup'), { stepClass: 'execute', risk: 'low' });
   assert.deepEqual(classifyAutomationStep('review.request'), { stepClass: 'execute', risk: 'low' });
   assert.deepEqual(classifyAutomationStep('business.report'), { stepClass: 'execute', risk: 'low' });
-  assert.deepEqual(classifyAutomationStep('appointment.book'), { stepClass: 'approval', risk: 'medium' });
-  assert.deepEqual(classifyAutomationStep('message.send_template'), { stepClass: 'approval', risk: 'medium' });
-  assert.deepEqual(classifyAutomationStep('quote.send'), { stepClass: 'approval', risk: 'high' });
-  assert.deepEqual(classifyAutomationStep('payment.refund'), { stepClass: 'approval', risk: 'high' });
+  // Registry entries are not automatically runnable. Until a complete
+  // provider-backed executor exists, an automation must reject the step.
+  assert.deepEqual(classifyAutomationStep('availability.check'), { stepClass: 'denied', risk: 'prohibited' });
+  assert.deepEqual(classifyAutomationStep('appointment.book'), { stepClass: 'denied', risk: 'prohibited' });
+  assert.deepEqual(classifyAutomationStep('message.send_template'), { stepClass: 'denied', risk: 'prohibited' });
+  assert.deepEqual(classifyAutomationStep('quote.send'), { stepClass: 'denied', risk: 'prohibited' });
+  assert.deepEqual(classifyAutomationStep('payment.refund'), { stepClass: 'denied', risk: 'prohibited' });
   assert.deepEqual(classifyAutomationStep('workspace.permissions.change'), { stepClass: 'denied', risk: 'prohibited' });
   assert.deepEqual(classifyAutomationStep('secret.read'), { stepClass: 'denied', risk: 'prohibited' });
   assert.deepEqual(classifyAutomationStep('not.a.real.tool'), { stepClass: 'denied', risk: 'prohibited' });
@@ -116,10 +119,11 @@ test('the automation runner claims atomically, retries and dead-letters', () => 
   const runnerSource = source('server/automation/runner.ts');
   assert.match(runnerSource, /in\('status', \['queued', 'failed'\]\)/);
   assert.match(runnerSource, /exhausted/);
+  assert.doesNotMatch(runnerSource, /\.neq\('state->>exhausted'/);
+  assert.match(runnerSource, /status: exhausted \? 'cancelled' : 'failed'/);
   assert.match(runnerSource, /automation_attempts/);
   assert.match(runnerSource, /TOOL_NOT_ALLOWED/);
-  assert.match(runnerSource, /waiting/);
-  assert.match(runnerSource, /approvals'\)\.insert/);
+  assert.match(runnerSource, /AUTOMATION_EXECUTABLE_TOOLS/);
   // Denied tools must be rejected before the executor is reached.
   const deniedAt = runnerSource.indexOf("classified.stepClass === 'denied'");
   const executeAt = runnerSource.indexOf('executeAutomaticStep(run.workspace_id, step)');

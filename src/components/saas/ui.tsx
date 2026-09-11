@@ -10,11 +10,11 @@ export function Card({ children, className = '' }: { children: React.ReactNode; 
 }
 
 export function PrimaryButton({ children, className = '', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  return <button {...props} className={`rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}>{children}</button>;
+  return <button {...props} className={`rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}>{children}</button>;
 }
 
 export function SecondaryButton({ children, className = '', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  return <button {...props} className={`rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}>{children}</button>;
+  return <button {...props} className={`rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}>{children}</button>;
 }
 
 export function Field({ label, hint, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string }) {
@@ -50,9 +50,11 @@ export function PageIntro({ children, className = '' }: { children: React.ReactN
   return <div className={`mb-5 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 text-sm leading-6 text-slate-600 ${className}`}><span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-indigo-100 text-[11px] font-black text-indigo-700">i</span><div className="min-w-0">{children}</div></div>;
 }
 
-// Compact metric card with an icon accent. Used in page summary strips.
-export function StatCard({ icon, label, value, sub, className = '' }: { icon?: React.ReactNode; label: string; value: React.ReactNode; sub?: string; className?: string }) {
-  return <Card className={`p-4 ${className}`}><div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-500">{label}</p>{icon && <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">{icon}</span>}</div><div className="mt-1.5 text-2xl font-black tracking-tight text-slate-950">{value}</div>{sub && <p className="mt-1 text-[11px] leading-4 text-slate-400">{sub}</p>}</Card>;
+// Compact metric card with an icon accent. Used in page summary strips. A
+// `pendingNote` explains why a value is zero or pending inline — numbers never
+// appear without their context.
+export function StatCard({ icon, label, value, sub, pendingNote, className = '' }: { icon?: React.ReactNode; label: string; value: React.ReactNode; sub?: string; pendingNote?: string; className?: string }) {
+  return <Card className={`p-4 ${className}`}><div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-500">{label}</p>{icon && <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">{icon}</span>}</div><div className="mt-1.5 text-2xl font-black tracking-tight text-slate-950">{value}</div>{sub && <p className="mt-1 text-[11px] leading-4 text-slate-400">{sub}</p>}{pendingNote && <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] leading-4 font-medium text-amber-800">{pendingNote}</p>}</Card>;
 }
 
 // Guided first-run card. Each item is a real next step with its destination;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import {
   Activity, BarChart3, Bell, Bot, Brain, BriefcaseBusiness, Calculator, CalendarDays, ChevronDown,
   CircleDollarSign, ClipboardList, Clock3, ContactRound, CreditCard, FileCheck2, FileText, Globe,
@@ -12,15 +12,20 @@ import { logoutUser } from '../lib/supabase';
 import { apiFetch } from '../lib/api';
 import {
   AnalyticsPage, ApprovalsPage, AutomationsPage, BillingPage, CapabilityMapPage, CommandCentrePage,
-  ComingSoonPage, CustomersPage, DashboardPage, InboxPage, IntegrationsPage, KnowledgePage, LeadsPage,
+  ComingSoonPage, CustomersPage, DashboardPage, InboxPage, KnowledgePage, LeadsPage,
   MarketingPage, ModulePage, NotificationsPage, OperationsListPage, OperatorPage, ReceptionistPage, ReviewsPage, SecuritySettingsPage, SettingsPage, TeamPage,
 } from './AppPages';
-import { HiringPage } from './HiringPage';
-import { CustomerDetailPage, JobDetailPage } from './OperationalDetailPages';
-import { RecurringJobsPage, TimeMaterialsLogPage } from './FieldOpsPages';
-import { SchedulePage } from './SchedulePage';
-import { BusinessBrainPage } from './BusinessBrainPage';
-import { AssetsPage } from './AssetsPage';
+// Heavy, lower-frequency pages are lazy: the primary dashboard surfaces load
+// first, and each page module becomes its own download when visited.
+const HiringPage = lazy(() => import('./HiringPage').then((m) => ({ default: m.HiringPage })));
+const CustomerDetailPage = lazy(() => import('./OperationalDetailPages').then((m) => ({ default: m.CustomerDetailPage })));
+const JobDetailPage = lazy(() => import('./OperationalDetailPages').then((m) => ({ default: m.JobDetailPage })));
+const RecurringJobsPage = lazy(() => import('./FieldOpsPages').then((m) => ({ default: m.RecurringJobsPage })));
+const TimeMaterialsLogPage = lazy(() => import('./FieldOpsPages').then((m) => ({ default: m.TimeMaterialsLogPage })));
+const SchedulePage = lazy(() => import('./SchedulePage').then((m) => ({ default: m.SchedulePage })));
+const BusinessBrainPage = lazy(() => import('./BusinessBrainPage').then((m) => ({ default: m.BusinessBrainPage })));
+const AssetsPage = lazy(() => import('./AssetsPage').then((m) => ({ default: m.AssetsPage })));
+const IntegrationsPage = lazy(() => import('./IntegrationsPage').then((m) => ({ default: m.IntegrationsPage })));
 import { useTheme } from '../app/theme';
 
 type NavItem = [string, string, React.ComponentType<{ className?: string }>, boolean?];
@@ -31,7 +36,7 @@ type NavGroup = { label: string; items: NavItem[] };
 // COMING_SOON_FEATURES in AppPages.
 const groups: NavGroup[] = [
   { label:'', items:[
-    ['/app','Command Centre',Home],
+    ['/app','Today',Home],
     ['/app/inbox','Inbox',Inbox],
     ['/app/notifications','Notifications',Bell],
   ]},
@@ -60,12 +65,14 @@ const groups: NavGroup[] = [
     ['/app/coming-soon/supplier-purchasing','Supplier purchasing',Package,true],
   ]},
   { label:'AI Admin', items:[
+    ['/app/command','Command Centre',Sparkles],
     ['/app/operator/phone','AI Receptionist',Phone],
     ['/app/automations','Automations',Workflow],
     ['/app/approvals','Approvals',ShieldCheck],
     ['/app/brain','Business Brain',Brain],
     ['/app/knowledge','Knowledge',LibraryBig],
     ['/app/operator','Operator log',Bot],
+    ['/app/capabilities','Capability map',ShieldCheck],
     ['/app/coming-soon/ai-recaps','AI post-work recaps',Sparkles,true],
     ['/app/coming-soon/voicemail','Voicemail transcription',Voicemail,true],
     ['/app/coming-soon/call-recordings','Call recordings',PhoneCall,true],
@@ -148,7 +155,7 @@ export default function AppShell() {
   },[]);
   if(auth.loading||!auth.session||!auth.workspaceId||!subscriptionChecked)return <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">Loading secure workspace…</div>;
 
-  const restrictedForStaff=new Set(['/app/hiring','/app/marketing','/app/brain','/app/automations','/app/analytics','/app/approvals','/app/integrations','/app/team','/app/billing','/app/settings']);
+  const restrictedForStaff=new Set(['/app/hiring','/app/marketing','/app/operator/phone','/app/operator','/app/capabilities','/app/brain','/app/knowledge','/app/automations','/app/analytics','/app/approvals','/app/integrations','/app/team','/app/billing','/app/settings']);
   const visibleGroups=auth.workspace?.role==='staff'?groups.map(group=>({...group,items:group.items.filter(([href])=>!restrictedForStaff.has(href))})):groups;
   const paletteItems: NavItem[] = visibleGroups.flatMap((group)=>group.items);
   const content = routePage(path);
@@ -159,9 +166,9 @@ export default function AppShell() {
       <div className="flex h-16 items-center justify-between border-b border-slate-100 px-4"><AppLink href="/app" onClick={()=>setMobile(false)} className="flex items-center gap-2.5 font-black tracking-tight"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-white">J</span>JOBRIN.AI</AppLink><button onClick={()=>setMobile(false)} className="rounded-lg p-2 text-slate-500 lg:hidden"><X className="h-4 w-4"/></button></div>
       <div className="border-b border-slate-100 p-3"><label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Workspace</label><div className="relative mt-1"><select value={auth.workspaceId} onChange={e=>auth.setWorkspaceId(e.target.value)} className="w-full appearance-none rounded-xl bg-slate-50 px-3 py-2.5 pr-8 text-sm font-semibold outline-none"><option value={auth.workspaceId}>{auth.workspace?.name}</option>{auth.workspaces.filter(w=>w.id!==auth.workspaceId).map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</select><ChevronDown className="pointer-events-none absolute right-2.5 top-3 h-4 w-4 text-slate-400"/></div><div className="mt-2 flex items-center justify-between px-1 text-[11px]"><span className="capitalize text-slate-500">{auth.workspace?.role}</span><span className="rounded-full bg-indigo-50 px-2 py-0.5 font-semibold capitalize text-indigo-700">{auth.workspace?.plan}</span></div></div>
       <nav className="h-[calc(100vh-205px)] overflow-y-auto px-2 py-3">{visibleGroups.map((group,gi)=>group.label? <details key={gi} className="mb-3" open={group.items.some(([href])=>path===href||path.startsWith(`${href}/`))}><summary className="cursor-pointer list-none rounded-xl px-3 py-2 text-xs font-bold uppercase tracking-[.14em] text-slate-400 hover:bg-slate-50">{group.label}</summary><div className="mt-1 border-l border-slate-200 pl-1">{group.items.map(([href,label,Icon,soon])=>{const active=path===href||path.startsWith(`${href}/`);return <AppLink key={href} href={href} onClick={()=>setMobile(false)} className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${active?'bg-slate-950 text-white':'text-slate-600 hover:bg-slate-100 hover:text-slate-950'}`}><Icon className={`h-4 w-4 flex-none ${active?'text-indigo-300':'text-slate-400'}`}/><span className="flex-1">{label}</span>{soon===true&&<span className="flex-none rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-400">soon</span>}</AppLink>})}</div></details>:<div key={gi} className="mb-3">{group.items.map(([href,label,Icon,soon])=>{const active=path===href||(href!=='/app'&&path.startsWith(`${href}/`));return <AppLink key={href} href={href} onClick={()=>setMobile(false)} className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${active?'bg-slate-950 text-white':'text-slate-600 hover:bg-slate-100 hover:text-slate-950'}`}><Icon className={`h-4 w-4 ${active?'text-indigo-300':'text-slate-400'}`}/><span className="flex-1">{label}</span>{soon===true&&<span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-400">soon</span>}</AppLink>})}</div>)}</nav>
-      <div className="absolute inset-x-0 bottom-0 border-t border-slate-100 bg-white p-3"><div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-50 text-sm font-bold text-indigo-700">{(auth.user?.user_metadata?.display_name||auth.user?.email||'U')[0]?.toUpperCase()}</div><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{auth.user?.user_metadata?.display_name||auth.user?.email}</p><p className="truncate text-[10px] text-slate-400">{auth.user?.email}</p></div><button title="Log out" onClick={async()=>{await logoutUser();navigate('/login',true)}} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><LogOut className="h-4 w-4"/></button></div></div>
+      <div className="absolute inset-x-0 bottom-0 border-t border-slate-100 bg-white p-3"><div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-50 text-sm font-bold text-indigo-700">{(auth.user?.user_metadata?.display_name||auth.user?.email||'U')[0]?.toUpperCase()}</div><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{auth.user?.user_metadata?.display_name||auth.user?.email}</p><p className="truncate text-[10px] text-slate-400">{auth.user?.email}</p></div><button title="Log out" aria-label="Log out" onClick={async()=>{await logoutUser();navigate('/login',true)}} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><LogOut className="h-4 w-4"/></button></div></div>
     </aside>
-    <div className="lg:pl-[270px] pb-16 lg:pb-0"><header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/90 px-4 backdrop-blur sm:px-6"><div className="flex items-center gap-3"><button onClick={()=>setMobile(true)} className="rounded-xl border border-slate-200 p-2 lg:hidden"><Menu className="h-4 w-4"/></button><button onClick={()=>setPaletteOpen(true)} title="Search (Ctrl+K)" className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-400 hover:border-indigo-300 hover:text-slate-600"><Search className="h-3.5 w-3.5"/>Search…<span className="hidden rounded border border-slate-200 px-1 text-[10px] sm:inline">Ctrl K</span></button><div className="hidden text-xs text-slate-400 sm:block">{auth.workspace?.name} / <span className="font-semibold text-slate-700">{pageTitle(path)}</span></div></div><div className="flex items-center gap-2"><button onClick={cycleTheme} title="Theme" className="rounded-xl p-2 text-slate-500 hover:bg-slate-100">{theme==='dark'?<Moon className="h-4 w-4"/>:<Sun className="h-4 w-4"/>}</button><AppLink href="/app/notifications" className="relative rounded-xl p-2 text-slate-500 hover:bg-slate-100"><Bell className="h-4 w-4"/>{unreadCount!==null&&unreadCount>0&&<span className="absolute right-1 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-indigo-600 text-[9px] font-black text-white">{unreadCount>9?'9+':unreadCount}</span>}</AppLink><AppLink href="/app/settings/security" className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"><KeyRound className="h-4 w-4"/></AppLink></div></header><main className="mx-auto max-w-[1500px] p-4 sm:p-6 lg:p-8">{content}</main></div>
+    <div className="lg:pl-[270px] pb-16 lg:pb-0"><header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/90 px-4 backdrop-blur sm:px-6"><div className="flex items-center gap-3"><button onClick={()=>setMobile(true)} aria-label="Open navigation" className="rounded-xl border border-slate-200 p-2 lg:hidden"><Menu className="h-4 w-4"/></button><button onClick={()=>setPaletteOpen(true)} title="Search (Ctrl+K)" aria-label="Search pages" className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-400 hover:border-indigo-300 hover:text-slate-600"><Search className="h-3.5 w-3.5"/>Search…<span className="hidden rounded border border-slate-200 px-1 text-[10px] sm:inline">Ctrl K</span></button><div className="hidden text-xs text-slate-400 sm:block">{auth.workspace?.name} / <span className="font-semibold text-slate-700">{pageTitle(path)}</span></div></div><div className="flex items-center gap-2"><button onClick={cycleTheme} title={`Theme: ${theme}`} aria-label={`Theme: ${theme}`} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100">{theme==='dark'?<Moon className="h-4 w-4"/>:<Sun className="h-4 w-4"/>}</button><AppLink href="/app/notifications" aria-label="Notifications" className="relative rounded-xl p-2 text-slate-500 hover:bg-slate-100"><Bell className="h-4 w-4"/>{unreadCount!==null&&unreadCount>0&&<span className="absolute right-1 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-indigo-600 text-[9px] font-black text-white">{unreadCount>9?'9+':unreadCount}</span>}</AppLink><AppLink href="/app/settings/security" aria-label="Security settings" className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"><KeyRound className="h-4 w-4"/></AppLink></div></header><main className="mx-auto max-w-[1500px] p-4 sm:p-6 lg:p-8"><Suspense fallback={<div className="flex min-h-[220px] items-center justify-center text-sm text-slate-500">Loading page…</div>}>{content}</Suspense></main></div>
     <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-slate-200 bg-white lg:hidden">
       {([['/app','Command Centre',Home],['/app/inbox','Inbox',Inbox],['/app/schedule','Schedule',CalendarDays],['/app/jobs','Jobs',FileCheck2]] as NavItem[]).map(([href,label,Icon])=>{const active=path===href||path.startsWith(`${href}/`);return <AppLink key={href} href={href} className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold ${active?'text-indigo-600':'text-slate-400'}`}><Icon className="h-4 w-4"/>{label}</AppLink>})}
       <button onClick={()=>setMobile(true)} className="flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold text-slate-400"><Menu className="h-4 w-4"/>More</button>

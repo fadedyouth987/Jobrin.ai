@@ -3,6 +3,7 @@ import twilio from 'twilio';
 import { z } from 'zod';
 import { env } from '../env';
 import { issueCallToken, isReceptionistEngineAttached, simulateAdminTurn } from '../ai/receptionistCall';
+import { evaluateGoLiveChecklist } from '../ai/receptionistReadiness';
 import { normalizeE164, twilioConfigured } from '../providers/twilio';
 import { openaiConfigured } from '../providers/openai';
 import { asyncRoute, validateBody } from '../security';
@@ -31,14 +32,30 @@ function websocketUrl() {
 }
 
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('crm.core'));
+
+// Technical provider readiness + the architecture's go-live checklist (profile,
+// approved knowledge, transfer number, recording consent, owner sign-off).
 router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
-  const { data, error } = await db.from('receptionist_profiles').select('*').eq('workspace_id', req.workspaceId!).maybeSingle();
-  if (error) return res.status(500).json({ error: 'RECEPTIONIST_PROFILE_LOAD_FAILED' });
-  res.json({ profile: data, readiness: {
+  const [profileResult, businessResult, knowledgeCount, signoffResult] = await Promise.all([
+    db.from('receptionist_profiles').select('*').eq('workspace_id', req.workspaceId!).maybeSingle(),
+    db.from('business_profiles').select('trading_name,phone,suburb,state').eq('workspace_id', req.workspaceId!).maybeSingle(),
+    db.from('knowledge_documents').select('id', { count: 'exact', head: true }).eq('workspace_id', req.workspaceId!).eq('approved', true),
+    db.from('approvals').select('decision_note,decided_by,decided_at')
+      .eq('workspace_id', req.workspaceId!).eq('resource_type', 'receptionist.go_live').eq('status', 'approved')
+      .order('decided_at', { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  if (profileResult.error) return res.status(500).json({ error: 'RECEPTIONIST_PROFILE_LOAD_FAILED' });
+  const technical = {
     twilio: twilioConfigured(), ai: openaiConfigured(), securePublicUrl: env.APP_URL.startsWith('https://'),
     conversationRelay: isReceptionistEngineAttached(),
-  }});
+  };
+  const goLive = evaluateGoLiveChecklist({
+    profile: profileResult.data, businessProfile: businessResult.data ?? null,
+    approvedKnowledgeCount: knowledgeCount.count ?? 0, technical,
+    signoff: signoffResult.data ?? null,
+  });
+  res.json({ profile: profileResult.data, readiness: technical, goLive });
 }));
 
 router.get('/calls', asyncRoute(async (req: AuthenticatedRequest, res) => {
@@ -61,6 +78,17 @@ router.put('/', requireRole('owner','admin'), requireSensitiveAuth, validateBody
     if (missing.length) {
       return res.status(409).json({ error: 'RECEPTIONIST_NOT_READY', message: `Live answering stays locked until: ${missing.join(', ')}.` });
     }
+    // Architecture go-live checklist: the owner must have recorded sign-off
+    // after reviewing the setup and phase-1 behaviour. Technical readiness
+    // alone never unlocks live answering.
+    const { data: signoffRow, error: signoffError } = await supabaseAdmin.from('approvals')
+      .select('id')
+      .eq('workspace_id', req.workspaceId!).eq('resource_type', 'receptionist.go_live').eq('status', 'approved')
+      .limit(1).maybeSingle();
+    if (signoffError) return res.status(500).json({ error: 'RECEPTIONIST_SIGNOFF_CHECK_FAILED' });
+    if (!signoffRow) {
+      return res.status(409).json({ error: 'RECEPTIONIST_SIGNOFF_REQUIRED', message: 'Live answering unlocks only after the workspace owner reviews the go-live checklist and records sign-off.' });
+    }
   }
   const db = createUserClient(req.auth!.accessToken);
   const { data, error } = await db.from('receptionist_profiles').upsert({ ...req.body, workspace_id: req.workspaceId!, updated_at: new Date().toISOString() }).select('*').single();
@@ -75,10 +103,46 @@ const simulateSchema = z.object({
   mode: z.enum(['receptionist', 'finance', 'sales', 'marketing', 'support']).default('receptionist'),
 }).strict();
 
+// Auditable owner sign-off for live answering. Records who approved, when and
+// with what review note — an approvals row, not a hidden flag. Blocked until
+// every other go-live checklist item is green.
+const signoffSchema = z.object({ note: z.string().trim().min(20).max(2000) }).strict();
+
+router.post('/go-live-signoff', requireRole('owner'), requireSensitiveAuth, validateBody(signoffSchema), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const [profileResult, businessResult, knowledgeCount] = await Promise.all([
+    db.from('receptionist_profiles').select('transfer_number,recording_enabled,recording_consent_prompt').eq('workspace_id', req.workspaceId!).maybeSingle(),
+    db.from('business_profiles').select('trading_name,phone,suburb,state').eq('workspace_id', req.workspaceId!).maybeSingle(),
+    db.from('knowledge_documents').select('id', { count: 'exact', head: true }).eq('workspace_id', req.workspaceId!).eq('approved', true),
+  ]);
+  if (profileResult.error) return res.status(500).json({ error: 'RECEPTIONIST_PROFILE_LOAD_FAILED' });
+  const checklist = evaluateGoLiveChecklist({
+    profile: profileResult.data,
+    businessProfile: businessResult.data ?? null,
+    approvedKnowledgeCount: knowledgeCount.count ?? 0,
+    technical: {
+      twilio: twilioConfigured(), ai: openaiConfigured(),
+      securePublicUrl: env.APP_URL.startsWith('https://'), conversationRelay: isReceptionistEngineAttached(),
+    },
+  });
+  const blocking = checklist.missing.filter((label) => label !== 'Owner sign-off recorded');
+  if (blocking.length) {
+    return res.status(409).json({ error: 'RECEPTIONIST_SIGNOFF_BLOCKED', message: `Sign-off is blocked until: ${blocking.join(', ')}.`, checklist: checklist.items });
+  }
+  const now = new Date().toISOString();
+  const { data: record, error } = await supabaseAdmin.from('approvals').insert({
+    workspace_id: req.workspaceId!, resource_type: 'receptionist.go_live', resource_id: req.workspaceId!,
+    reason: req.body.note, status: 'approved', decided_by: req.auth!.userId, decided_at: now,
+  }).select('id,resource_type,reason,status,decided_by,decided_at').single();
+  if (error) return res.status(500).json({ error: 'RECEPTIONIST_SIGNOFF_FAILED' });
+  await writeAudit(req, 'receptionist.go_live_signed', 'receptionist_profile', req.workspaceId!, { review_note: 'Owner recorded go-live sign-off.' });
+  res.status(201).json({ signoff: { decided_at: now, decided_by: req.auth!.userId, decision_note: req.body.note }, record });
+}));
+
 // Text-mode preview of the exact engine a phone call uses. Owner/admin/manager
 // only; never sends anything and never touches the phone network.
 router.post('/simulate', requireRole('owner', 'admin', 'manager'), validateBody(simulateSchema), asyncRoute(async (req: AuthenticatedRequest, res) => {
-  const result = await simulateAdminTurn(req.workspaceId!, req.body.message, req.body.history, null, req.body.mode);
+  const result = await simulateAdminTurn(req.workspaceId!, req.body.message, req.body.history, null, req.body.mode, `simulate-${req.requestId}`);
   await writeAudit(req, 'receptionist.simulated', 'receptionist_profile', req.workspaceId!, { configured: result.configured, messageTaken: result.messageTaken });
   res.json(result);
 }));
