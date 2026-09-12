@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { AnchorHTMLAttributes, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 
 export function navigate(path: string, replace = false) {
@@ -17,9 +17,9 @@ export function usePathname() {
   return path;
 }
 
-export function AppLink({ href, children, className = '', onClick }: { href: string; children: ReactNode; className?: string; onClick?: () => void }) {
+export function AppLink({ href, children, className = '', onClick, ...props }: { href: string; children: ReactNode; className?: string; onClick?: () => void } & Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href' | 'children' | 'className' | 'onClick'>) {
   return (
-    <a href={href} className={className} onClick={(event) => {
+    <a {...props} href={href} className={className} onClick={(event) => {
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
       onClick?.();

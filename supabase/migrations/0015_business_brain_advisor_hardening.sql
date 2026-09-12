@@ -1,4 +1,4 @@
--- Advisor-driven indexes and explicit server-only RLS posture for Jobryn's new structures.
+-- Advisor-driven indexes and explicit server-only RLS posture for Jobrin.ai's new structures.
 
 create index if not exists automation_attempts_workspace_idx on public.automation_attempts(workspace_id);
 create index if not exists customer_assets_customer_fk_idx on public.customer_assets(customer_id);

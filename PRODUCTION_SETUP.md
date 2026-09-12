@@ -22,7 +22,7 @@ npm run dev
 
 Apply migrations in order:
 
-1. `supabase/migrations/0001_vantory_core.sql` (historical compatibility name)
+1. `supabase/migrations/0001_jobrin_core.sql`
 2. `supabase/migrations/0002_saas_roles_and_plans.sql`
 3. `supabase/migrations/0003_revenue_os_core.sql`
 4. `supabase/migrations/0004_subscription_and_tenant_invariants.sql`
@@ -41,6 +41,7 @@ Apply migrations in order:
 17. `supabase/migrations/0017_trade_hiring_pipeline.sql`
 18. `supabase/migrations/0018_communications_hub.sql`
 19. `supabase/migrations/0019_deployment_hardening.sql`
+20. Apply the remaining numbered migrations in order through `supabase/migrations/0026_rename_jobrin_assets_bucket.sql`.
 
 Use the browser publishable/anon key only in `VITE_*` variables. The service-role key belongs on the server only.
 
@@ -61,7 +62,7 @@ In Supabase Authentication:
 - enable email/password
 - require email verification in production
 - configure the production Site URL
-- allow `https://jobrin.ai/auth/callback` and `https://jobrin.ai/reset-password`
+- allow `https://jobrin.ai/auth/callback`, `https://jobrin.ai/reset-password`, and `https://jobrin.ai/accept-invite`
 - enable Google and GitHub as the first OAuth providers
 - optionally enable Azure/Microsoft and Apple
 - configure provider client IDs/secrets in Supabase, never in the browser
@@ -126,6 +127,7 @@ VITE_SUPABASE_ANON_KEY=...
 SUPABASE_URL=...
 SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
+RECEPTIONIST_SIGNING_SECRET=...
 
 STRIPE_SECRET_KEY=...
 STRIPE_WEBHOOK_SECRET=...
@@ -135,6 +137,8 @@ STRIPE_PRICE_OPERATOR=...
 
 REQUIRE_AAL2_SENSITIVE=true
 REQUIRE_EMAIL_VERIFICATION=true
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-3.7-flash
 ```
 
 Use a managed secrets store on your host. Do not place secrets in `VITE_*` variables or source control.

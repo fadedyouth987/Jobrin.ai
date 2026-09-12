@@ -1,4 +1,4 @@
--- Jobryn SaaS v1.0 - role and plan compatibility migration.
+-- Jobrin.ai SaaS v1.0 - role and plan compatibility migration.
 -- Keep this migration separate because PostgreSQL enum values should be committed
 -- before they are referenced by later policies/functions.
 

@@ -1,4 +1,4 @@
--- Jobryn least-privilege RBAC.
+-- Jobrin.ai least-privilege RBAC.
 -- Supabase's authenticated REST API is a real security boundary, so RLS/grants must
 -- independently match the API permission model rather than relying on Express alone.
 
@@ -187,16 +187,16 @@ drop policy if exists asset_objects_creator_insert on storage.objects;
 drop policy if exists asset_objects_creator_update on storage.objects;
 create policy asset_objects_manager_insert on storage.objects for insert to authenticated
 with check (
-  bucket_id = 'vantory-assets'
+  bucket_id = 'jobrin-assets'
   and private.has_workspace_role(((storage.foldername(name))[1])::uuid, array['owner','admin','manager']::public.workspace_role[])
 );
 create policy asset_objects_manager_update on storage.objects for update to authenticated
 using (
-  bucket_id = 'vantory-assets'
+  bucket_id = 'jobrin-assets'
   and private.has_workspace_role(((storage.foldername(name))[1])::uuid, array['owner','admin','manager']::public.workspace_role[])
 )
 with check (
-  bucket_id = 'vantory-assets'
+  bucket_id = 'jobrin-assets'
   and private.has_workspace_role(((storage.foldername(name))[1])::uuid, array['owner','admin','manager']::public.workspace_role[])
 );
 

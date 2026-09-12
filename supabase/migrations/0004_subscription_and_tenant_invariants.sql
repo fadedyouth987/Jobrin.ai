@@ -1,4 +1,4 @@
--- Jobryn SaaS hardening: trial enforcement, booking concurrency and same-tenant references.
+-- Jobrin.ai SaaS hardening: trial enforcement, booking concurrency and same-tenant references.
 
 create extension if not exists btree_gist;
 

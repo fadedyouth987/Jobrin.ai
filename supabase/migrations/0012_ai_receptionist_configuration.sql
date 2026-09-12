@@ -1,9 +1,9 @@
--- Tenant-owned, non-secret configuration for the Jobryn AI receptionist.
+-- Tenant-owned, non-secret configuration for the Jobrin.ai AI receptionist.
 -- Provider credentials remain server-side environment secrets.
 create table if not exists public.receptionist_profiles (
   workspace_id uuid primary key references public.workspaces(id) on delete cascade,
   enabled boolean not null default false,
-  display_name text not null default 'Jobryn Receptionist' check (char_length(display_name) between 2 and 80),
+  display_name text not null default 'Jobrin.ai Receptionist' check (char_length(display_name) between 2 and 80),
   greeting text not null default 'Thanks for calling. How can I help you today?' check (char_length(greeting) between 10 and 500),
   voice_provider text not null default 'Google' check (voice_provider in ('Google','Amazon','ElevenLabs')),
   voice_id text not null default 'en-AU-Chirp3-HD-Achernar' check (char_length(voice_id) between 2 and 120),

@@ -10,6 +10,7 @@ import { createUserClient, requireActiveSubscription, requireAuth, requireRole, 
 
 const router = Router();
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('booking.core'));
+const ASSET_BUCKET = 'jobrin-assets';
 
 router.get('/appointments', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
@@ -327,7 +328,7 @@ router.post('/service-agreements/:id/generate', requireRole('owner', 'admin', 'm
 
 // ---------- Field Completion Pack ----------
 
-// Photos: upload via base64 to Supabase Storage (vantory-assets bucket)
+// Photos: upload via base64 to the private Jobrin.ai Supabase Storage bucket.
 router.post('/jobs/:id/photos', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(z.object({
   file_name: z.string().trim().min(1).max(255),
   mime_type: z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4']),
@@ -342,7 +343,7 @@ router.post('/jobs/:id/photos', requireRole('owner', 'admin', 'manager', 'staff'
   if (buffer.length > 25 * 1024 * 1024) return res.status(400).json({ error: 'FILE_TOO_LARGE' });
   const ext = req.body.file_name.split('.').pop() || 'jpg';
   const path = `${req.workspaceId}/${req.params.id}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
-  const { error: uploadError } = await supabaseAdmin.storage.from('vantory-assets').upload(path, buffer, { contentType: req.body.mime_type });
+  const { error: uploadError } = await supabaseAdmin.storage.from(ASSET_BUCKET).upload(path, buffer, { contentType: req.body.mime_type });
   if (uploadError) return res.status(500).json({ error: 'UPLOAD_FAILED', message: uploadError.message });
   await writeAudit(req, 'job.photo.uploaded', 'job', String(req.params.id), { fileName: req.body.file_name });
   res.status(201).json({ ok: true, path });
@@ -352,10 +353,10 @@ router.get('/jobs/:id/photos', requireRole('owner', 'admin', 'manager', 'staff')
   const db = createUserClient(req.auth!.accessToken);
   const { data: job, error: jobError } = await db.from('jobs').select('id').eq('workspace_id', req.workspaceId!).eq('id', req.params.id).maybeSingle();
   if (jobError || !job) return res.status(404).json({ error: 'JOB_NOT_FOUND' });
-  const { data: files, error } = await supabaseAdmin.storage.from('vantory-assets').list(`${req.workspaceId}/${req.params.id}`, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } });
+  const { data: files, error } = await supabaseAdmin.storage.from(ASSET_BUCKET).list(`${req.workspaceId}/${req.params.id}`, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } });
   if (error) return res.status(500).json({ error: 'PHOTO_LIST_FAILED' });
   const photos = await Promise.all((files ?? []).filter((f: any) => f.name !== '.emptyFolderPlaceholder').map(async (f: any) => {
-    const { data: signed } = await supabaseAdmin.storage.from('vantory-assets').createSignedUrl(`${req.workspaceId}/${req.params.id}/${f.name}`, 3600);
+    const { data: signed } = await supabaseAdmin.storage.from(ASSET_BUCKET).createSignedUrl(`${req.workspaceId}/${req.params.id}/${f.name}`, 3600);
     return { name: f.name, size: f.metadata?.size || 0, mime: f.metadata?.mimetype || '', url: signed?.signedUrl || null, created_at: f.created_at || null };
   }));
   res.json({ photos });
@@ -363,7 +364,7 @@ router.get('/jobs/:id/photos', requireRole('owner', 'admin', 'manager', 'staff')
 
 router.delete('/jobs/:id/photos/:photoName', requireRole('owner', 'admin', 'manager'), asyncRoute(async (req: AuthenticatedRequest, res) => {
   const path = `${req.workspaceId}/${req.params.id}/${req.params.photoName}`;
-  const { error } = await supabaseAdmin.storage.from('vantory-assets').remove([path]);
+  const { error } = await supabaseAdmin.storage.from(ASSET_BUCKET).remove([path]);
   if (error) return res.status(500).json({ error: 'PHOTO_DELETE_FAILED' });
   await writeAudit(req, 'job.photo.deleted', 'job', String(req.params.id), { photo: req.params.photoName }, 'warning');
   res.json({ ok: true });

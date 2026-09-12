@@ -1,4 +1,4 @@
--- Jobryn Core v0.1 (historical filename and database identifiers retained for compatibility)
+-- Jobrin.ai Core v0.1 (historical filename retained for compatibility)
 -- Multi-tenant SaaS foundation: auth profiles, workspaces, RLS, campaigns, assets, credits, billing and audit.
 
 create extension if not exists pgcrypto;
@@ -307,26 +307,26 @@ create trigger on_auth_user_created after insert on auth.users
 for each row execute procedure public.handle_new_user();
 
 -- Private asset bucket. Object access policies will be scoped by workspace UUID as first path segment.
-insert into storage.buckets(id, name, public) values ('vantory-assets','vantory-assets',false)
+insert into storage.buckets(id, name, public) values ('jobrin-assets','jobrin-assets',false)
 on conflict (id) do nothing;
 
 create policy asset_objects_member_select on storage.objects for select to authenticated
 using (
-  bucket_id = 'vantory-assets'
+  bucket_id = 'jobrin-assets'
   and private.is_workspace_member(((storage.foldername(name))[1])::uuid)
 );
 create policy asset_objects_creator_insert on storage.objects for insert to authenticated
 with check (
-  bucket_id = 'vantory-assets'
+  bucket_id = 'jobrin-assets'
   and private.has_workspace_role(((storage.foldername(name))[1])::uuid, array['owner','admin','approver','creator']::public.workspace_role[])
 );
 create policy asset_objects_creator_update on storage.objects for update to authenticated
 using (
-  bucket_id = 'vantory-assets'
+  bucket_id = 'jobrin-assets'
   and private.has_workspace_role(((storage.foldername(name))[1])::uuid, array['owner','admin','approver','creator']::public.workspace_role[])
 )
 with check (
-  bucket_id = 'vantory-assets'
+  bucket_id = 'jobrin-assets'
   and private.has_workspace_role(((storage.foldername(name))[1])::uuid, array['owner','admin','approver','creator']::public.workspace_role[])
 );
 

@@ -1,5 +1,5 @@
 -- Field Completion Pack: checklists, signatures, and job photo attachments.
--- Photos use the existing private vantory-assets bucket via the server.
+-- Photos use the private jobrin-assets bucket via the server.
 
 -- Checklist templates: reusable per service type or workspace-wide
 create table if not exists public.checklist_templates (

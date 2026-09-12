@@ -1,4 +1,4 @@
--- Jobryn field-service and durable safe-autopilot foundation.
+-- Jobrin.ai field-service and durable safe-autopilot foundation.
 -- This migration is additive and must be applied through the normal reviewed migration process.
 
 alter table public.automations

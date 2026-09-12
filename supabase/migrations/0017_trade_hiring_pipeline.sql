@@ -1,5 +1,5 @@
--- Jobryn employer-side hiring pipeline. This is intentionally not a labour-hire
--- model: Jobryn stores a business's own candidate records and never employs,
+-- Jobrin.ai employer-side hiring pipeline. This is intentionally not a labour-hire
+-- model: Jobrin.ai stores a business's own candidate records and never employs,
 -- pays, supplies or automatically selects workers.
 
 create table if not exists public.job_openings (

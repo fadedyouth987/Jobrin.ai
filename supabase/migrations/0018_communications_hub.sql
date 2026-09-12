@@ -1,5 +1,5 @@
 -- Customer communications: private internal notes and consent-first SMS campaigns.
--- Writes are performed by the authenticated Jobryn API; browser clients are read-only.
+-- Writes are performed by the authenticated Jobrin.ai API; browser clients are read-only.
 
 create table if not exists public.conversation_notes (
   id uuid primary key default gen_random_uuid(),
@@ -36,7 +36,7 @@ create table if not exists public.sms_campaign_recipients (
   campaign_id uuid not null references public.sms_campaigns(id) on delete cascade,
   customer_id uuid not null references public.customers(id) on delete cascade,
   destination text not null,
-  -- `unknown` means the provider request may have reached Twilio but Jobryn did
+  -- `unknown` means the provider request may have reached Twilio but Jobrin.ai did
   -- not receive a conclusive result. It must never be automatically retried.
   status text not null check (status in ('eligible','consent_missing','suppressed','sending','sent','delivered','failed','skipped','unknown')),
   provider_message_id text,

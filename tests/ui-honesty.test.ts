@@ -12,13 +12,13 @@ test("the public hero demo never promises a booking the receptionist cannot make
 });
 
 test("the AI Command Centre is reachable from the truth-in-UI navigation", async () => {
-  const shell = await read("../src/pages/AppShell.tsx");
-  assert.match(shell, /\['\/app\/command','Command Centre',Sparkles\]/);
+  const navigation = await read("../src/app/workspaceNavigation.tsx");
+  assert.match(navigation, /\['\/app\/command','Command Centre',Sparkles\]/);
 });
 
 test("dashboard navigation label matches the page it renders", async () => {
-  const shell = await read("../src/pages/AppShell.tsx");
-  assert.match(shell, /\['\/app','Today',Home\]/);
+  const navigation = await read("../src/app/workspaceNavigation.tsx");
+  assert.match(navigation, /\['\/app','Today',Home\]/);
 });
 
 test("live answering stays locked without an auditable owner sign-off", async () => {
@@ -64,7 +64,8 @@ test("shared surfaces carry the zero-context and accessibility affordances", asy
   const shell = await read("../src/pages/AppShell.tsx");
   assert.match(shell, /aria-label="Notifications"/);
   assert.match(shell, /aria-label="Log out"/);
-  assert.match(shell, /lazy\(\(\) => import\('\.\/HiringPage'\)/);
+  const navigation = await read("../src/app/workspaceNavigation.tsx");
+  assert.match(navigation, /import \{ HiringPage \} from '..\/pages\/HiringPage'/);
   const css = await read("../src/index.css");
   assert.match(css, /scroll-margin-top/);
 });

@@ -56,7 +56,7 @@ $$;
 revoke all on function public.create_workspace(text,text) from public, anon;
 grant execute on function public.create_workspace(text,text) to authenticated;
 
--- No active Jobryn route calls this legacy RPC. Keep it unavailable until a
+-- No active Jobrin.ai route calls this legacy RPC. Keep it unavailable until a
 -- dedicated owner/admin server workflow is implemented and tested.
 revoke all on function public.reserve_credits(uuid,bigint,text,text,uuid) from public, anon, authenticated;
 

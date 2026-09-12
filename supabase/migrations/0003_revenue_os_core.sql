@@ -1,5 +1,5 @@
--- Jobryn Revenue Operating System v1.0
--- Canonical operational schema. Jobryn owns the record; providers synchronize into it.
+-- Jobrin.ai Revenue Operating System v1.0
+-- Canonical operational schema. Jobrin.ai owns the record; providers synchronize into it.
 
 create extension if not exists pgcrypto;
 create extension if not exists vector;
@@ -569,7 +569,7 @@ create table if not exists public.revenue_attributions (
   source text not null,
   medium text,
   campaign_id uuid references public.campaigns(id) on delete set null,
-  touch_type text not null default 'last_touch' check (touch_type in ('first_touch','last_touch','assisted','vantory_generated')),
+  touch_type text not null default 'last_touch' check (touch_type in ('first_touch','last_touch','assisted','jobrin_generated')),
   revenue_cents bigint not null default 0 check (revenue_cents >= 0),
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
