@@ -42,6 +42,7 @@ const serverSecrets = [
   ['TWILIO_AUTH_TOKEN', 'Twilio auth token', 'SMS + receptionist'],
   ['TWILIO_PHONE_NUMBER', 'Twilio business number', 'SMS + receptionist'],
   ['OPENAI_API_KEY', 'OpenAI API key', 'AI receptionist replies, AI features, Brain extraction'],
+  ['RECEPTIONIST_SIGNING_SECRET', 'Receptionist context signing secret', 'signed per-call context in production'],
   ['EMAIL_API_KEY', 'Transactional email API key', 'quote/invoice email delivery'],
   ['EMAIL_FROM', 'Email from address', 'quote/invoice email delivery'],
 ];
@@ -57,6 +58,9 @@ const requiredMigrations = [
   '0020_public_document_links.sql',
   '0021_job_costing_policies.sql',
   '0022_field_completion_pack.sql',
+  '0023_asset_policies.sql',
+  '0024_receptionist_phase1_runtime.sql',
+  '0025_atomic_public_booking.sql',
 ];
 for (const migration of requiredMigrations) {
   const relativePath = `supabase/migrations/${migration}`;

@@ -1,0 +1,64 @@
+[
+  {
+    "path": "/api/health",
+    "status": 200,
+    "body": {
+      "status": "ok",
+      "product": "Jobrin.ai",
+      "version": "1.0.0-saas-foundation",
+      "releaseStatus": "PRE_PRODUCTION",
+      "authConfigured": true,
+      "databaseConfigured": false,
+      "privilegedDatabaseConfigured": false,
+      "stripeConfigured": false,
+      "aiConfigured": false,
+      "businessBrainWorkerConfigured": false,
+      "messagingConfigured": false,
+      "emailConfigured": false,
+      "automationRunnerConfigured": false,
+      "timestamp": "2026-09-10T17:01:26.409Z"
+    }
+  },
+  {
+    "path": "/api/workspaces",
+    "status": 401,
+    "body": {
+      "error": "AUTH_REQUIRED"
+    }
+  },
+  {
+    "path": "/api/crm/customers",
+    "status": 401,
+    "body": {
+      "error": "AUTH_REQUIRED"
+    }
+  },
+  {
+    "path": "/api/receptionist",
+    "status": 401,
+    "body": {
+      "error": "AUTH_REQUIRED"
+    }
+  },
+  {
+    "path": "/api/billing/status",
+    "status": 401,
+    "body": {
+      "error": "AUTH_REQUIRED"
+    }
+  },
+  {
+    "path": "/api/public/book/audit-nonexistent-business",
+    "status": 404,
+    "body": {
+      "error": "BUSINESS_NOT_FOUND"
+    }
+  },
+  {
+    "path": "/api/public/quotes/audit-nonexistent-token",
+    "status": 404,
+    "body": {
+      "error": "LINK_NOT_FOUND"
+    }
+  }
+]

@@ -1,0 +1,69 @@
+{
+  "checkedAt": "2026-09-10T17:11:13.919Z",
+  "database": {
+    "publicTables": 71,
+    "allPublicBaseTablesHaveRls": true,
+    "phase1ReceptionistColumnsPresent": false,
+    "appointmentJobIdExists": false,
+    "jobsAppointmentIdExists": true,
+    "authenticatedCanInsertAutomationRuns": false,
+    "missingExhaustedFlagComparison": null,
+    "publicTokenIndexesPresent": true,
+    "fieldCompletionTablesPresent": true,
+    "jobCostingWritePoliciesPresent": true,
+    "assetWritePoliciesPresent": true,
+    "migrationHistoryLastName": "deployment_hardening",
+    "notes": "Read-only metadata checks. Later effects exist without matching migration-history entries. No customer rows exported."
+  },
+  "browser": {
+    "pages": [
+      "/",
+      "/pricing",
+      "/signup",
+      "/login",
+      "/forgot-password",
+      "/reset-password"
+    ],
+    "theme": "dark (existing preference)",
+    "viewports": [
+      {
+        "page": "/",
+        "width": 1280,
+        "documentWidth": 1265
+      },
+      {
+        "page": "/pricing",
+        "width": 390,
+        "documentWidth": 375,
+        "overflow": false
+      },
+      {
+        "page": "/",
+        "width": 320,
+        "documentWidth": 305,
+        "overflow": false
+      }
+    ],
+    "brokenAnchor": {
+      "from": "/pricing",
+      "link": "Product",
+      "to": "/#product",
+      "viewportWidth": 390,
+      "sectionTop": 1627.737548828125,
+      "headerBottom": 70.4000015258789
+    },
+    "privateWorkspace": "Not signed in at last observation"
+  },
+  "checks": {
+    "tests": {
+      "passed": 58,
+      "failed": 0
+    },
+    "verify": "passed",
+    "npmAuditProduction": {
+      "total": 0,
+      "checkedUsing": "Windows system certificate store"
+    }
+  },
+  "scope": "Source, local running app, and connected Supabase metadata; not production end-to-end certification"
+}

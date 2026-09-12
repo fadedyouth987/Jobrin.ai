@@ -1,0 +1,1205 @@
+{
+  "frontendApiReferences": [
+    {
+      "file": "src/app/auth.tsx",
+      "line": 48,
+      "path": "/api/workspaces"
+    },
+    {
+      "file": "src/pages/AcceptInvitePage.tsx",
+      "line": 34,
+      "path": "/api/team/invites/accept"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 20,
+      "path": "/api/dashboard"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 21,
+      "path": "/api/workspaces/onboarding"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 22,
+      "path": "/api/billing/status"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 23,
+      "path": "/api/integrations"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 24,
+      "path": "/api/services"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 49,
+      "path": "/api/operator/command"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 56,
+      "path": "/api/crm/customers"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 57,
+      "path": "/api/crm/customers"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 65,
+      "path": "/api/crm/leads"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 69,
+      "path": "/api/crm/leads/${lead.id}/stage"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 70,
+      "path": "/api/crm/leads"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 82,
+      "path": "/api/communications/conversations"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 84,
+      "path": "/api/communications/conversations/${selectedId}"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 85,
+      "path": "/api/communications/conversations/${selectedId}"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 86,
+      "path": "/api/communications/consents"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 86,
+      "path": "/api/communications/sms"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 87,
+      "path": "/api/communications/conversations/${selectedId}/notes"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 92,
+      "path": "/api/communications/campaigns"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 93,
+      "path": "/api/communications/campaigns"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 94,
+      "path": "/api/communications/campaigns/${id}/${action}"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 102,
+      "path": "/api/operations/${kind}"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 109,
+      "path": "/api/operations/${kind}"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 110,
+      "path": "/api/crm/customers"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 111,
+      "path": "/api/operations/jobs"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 124,
+      "path": "/api/operations/${kind}"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 125,
+      "path": "/api/operations/invoices/${invoiceId}/checkout"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 128,
+      "path": "/api/operations/quotes/${row.id}/send"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 129,
+      "path": "/api/operations/quotes/${row.id}/link"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 130,
+      "path": "/api/operations/quotes/${row.id}/convert"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 132,
+      "path": "/api/operations/invoices/${row.id}/send"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 148,
+      "path": "/api/operations/jobs"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 149,
+      "path": "/api/crm/customers"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 161,
+      "path": "/api/operations/jobs"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 177,
+      "path": "/api/billing/status"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 178,
+      "path": "/api/billing/checkout"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 179,
+      "path": "/api/billing/portal"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 185,
+      "path": "/api/integrations"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 193,
+      "path": "/api/receptionist"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 193,
+      "path": "/api/receptionist/calls"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 195,
+      "path": "/api/receptionist"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 196,
+      "path": "/api/receptionist/simulate"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 223,
+      "path": "/api/intelligence/knowledge"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 224,
+      "path": "/api/intelligence/knowledge"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 228,
+      "path": "/api/intelligence/approvals"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 228,
+      "path": "/api/intelligence/approvals/${id}/decision"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 232,
+      "path": "/api/intelligence/automations"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 232,
+      "path": "/api/intelligence/automation-runs"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 232,
+      "path": "/api/intelligence/capabilities"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 234,
+      "path": "/api/intelligence/automations"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 235,
+      "path": "/api/intelligence/automations/${id}/status"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 236,
+      "path": "/api/intelligence/automations/${id}/run"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 245,
+      "path": "/api/intelligence/reviews"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 247,
+      "path": "/api/intelligence/attribution"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 249,
+      "path": "/api/team"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 251,
+      "path": "/api/team/invites"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 266,
+      "path": "/api/notifications"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 267,
+      "path": "/api/notifications/read-all"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 268,
+      "path": "/api/notifications/${id}/read"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 272,
+      "path": "/api/intelligence/ai-actions"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 275,
+      "path": "/api/integrations"
+    },
+    {
+      "file": "src/pages/AppPages.tsx",
+      "line": 276,
+      "path": "/api/billing/status"
+    },
+    {
+      "file": "src/pages/AppShell.tsx",
+      "line": 171,
+      "path": "/api/billing/status"
+    },
+    {
+      "file": "src/pages/AppShell.tsx",
+      "line": 184,
+      "path": "/api/notifications"
+    },
+    {
+      "file": "src/pages/AssetsPage.tsx",
+      "line": 22,
+      "path": "/api/assets"
+    },
+    {
+      "file": "src/pages/AssetsPage.tsx",
+      "line": 23,
+      "path": "/api/crm/customers"
+    },
+    {
+      "file": "src/pages/AssetsPage.tsx",
+      "line": 35,
+      "path": "/api/assets"
+    },
+    {
+      "file": "src/pages/BusinessBrainPage.tsx",
+      "line": 12,
+      "path": "/api/business-brain/memories?status=${status}&search=${encodeURIComponent(search)}"
+    },
+    {
+      "file": "src/pages/BusinessBrainPage.tsx",
+      "line": 12,
+      "path": "/api/business-brain/settings"
+    },
+    {
+      "file": "src/pages/BusinessBrainPage.tsx",
+      "line": 12,
+      "path": "/api/business-brain/metrics"
+    },
+    {
+      "file": "src/pages/BusinessBrainPage.tsx",
+      "line": 14,
+      "path": "/api/business-brain/memories/${id}"
+    },
+    {
+      "file": "src/pages/BusinessBrainPage.tsx",
+      "line": 15,
+      "path": "/api/business-brain/memories/${selected.memory.id}/decision"
+    },
+    {
+      "file": "src/pages/BusinessBrainPage.tsx",
+      "line": 16,
+      "path": "/api/business-brain/settings"
+    },
+    {
+      "file": "src/pages/HiringPage.tsx",
+      "line": 30,
+      "path": "/api/hiring/openings"
+    },
+    {
+      "file": "src/pages/HiringPage.tsx",
+      "line": 31,
+      "path": "/api/hiring/applications"
+    },
+    {
+      "file": "src/pages/HiringPage.tsx",
+      "line": 45,
+      "path": "/api/hiring/openings"
+    },
+    {
+      "file": "src/pages/HiringPage.tsx",
+      "line": 55,
+      "path": "/api/hiring/candidates"
+    },
+    {
+      "file": "src/pages/HiringPage.tsx",
+      "line": 60,
+      "path": "/api/hiring/applications"
+    },
+    {
+      "file": "src/pages/HiringPage.tsx",
+      "line": 68,
+      "path": "/api/hiring/applications/${application.id}/stage"
+    },
+    {
+      "file": "src/pages/HiringPage.tsx",
+      "line": 75,
+      "path": "/api/hiring/applications/${application.id}/notes"
+    },
+    {
+      "file": "src/pages/OnboardingPage.tsx",
+      "line": 23,
+      "path": "/api/workspaces"
+    },
+    {
+      "file": "src/pages/OnboardingPage.tsx",
+      "line": 24,
+      "path": "/api/workspaces/business-profile"
+    },
+    {
+      "file": "src/pages/OnboardingPage.tsx",
+      "line": 25,
+      "path": "/api/services"
+    },
+    {
+      "file": "src/pages/OperationalDetailPages.tsx",
+      "line": 30,
+      "path": "/api/operations/jobs/${id}"
+    },
+    {
+      "file": "src/pages/OperationalDetailPages.tsx",
+      "line": 35,
+      "path": "/api/operations/jobs/${id}/time"
+    },
+    {
+      "file": "src/pages/OperationalDetailPages.tsx",
+      "line": 36,
+      "path": "/api/operations/jobs/${id}/materials"
+    },
+    {
+      "file": "src/pages/OperationalDetailPages.tsx",
+      "line": 39,
+      "path": "/api/operations/jobs/${id}/status"
+    },
+    {
+      "file": "src/pages/OperationalDetailPages.tsx",
+      "line": 40,
+      "path": "/api/operations/jobs/${id}/schedule"
+    },
+    {
+      "file": "src/pages/OperationalDetailPages.tsx",
+      "line": 70,
+      "path": "/api/crm/customers/${id}"
+    },
+    {
+      "file": "src/pages/PublicBookingPage.tsx",
+      "line": 28,
+      "path": "/api/public/book/${encodeURIComponent(slug)}"
+    },
+    {
+      "file": "src/pages/PublicBookingPage.tsx",
+      "line": 40,
+      "path": "/api/public/book/${encodeURIComponent(slug)}"
+    },
+    {
+      "file": "src/pages/PublicBookingPage.tsx",
+      "line": 57,
+      "path": "/api/public/book/${encodeURIComponent(slug)}"
+    },
+    {
+      "file": "src/pages/PublicQuotePage.tsx",
+      "line": 32,
+      "path": "/api/public/quotes/${encodeURIComponent(token)}"
+    },
+    {
+      "file": "src/pages/PublicQuotePage.tsx",
+      "line": 45,
+      "path": "/api/public/quotes/${encodeURIComponent(token)}/decision"
+    },
+    {
+      "file": "src/pages/receptionist/ReceptionistWorkspace.tsx",
+      "line": 104,
+      "path": "/api/receptionist"
+    },
+    {
+      "file": "src/pages/receptionist/ReceptionistWorkspace.tsx",
+      "line": 105,
+      "path": "/api/receptionist/calls"
+    },
+    {
+      "file": "src/pages/receptionist/ReceptionistWorkspace.tsx",
+      "line": 106,
+      "path": "/api/intelligence/knowledge"
+    },
+    {
+      "file": "src/pages/receptionist/ReceptionistWorkspace.tsx",
+      "line": 116,
+      "path": "/api/receptionist"
+    },
+    {
+      "file": "src/pages/receptionist/ReceptionistWorkspace.tsx",
+      "line": 214,
+      "path": "/api/receptionist/simulate"
+    },
+    {
+      "file": "src/pages/receptionist/ReceptionistWorkspace.tsx",
+      "line": 240,
+      "path": "/api/receptionist/calls/${id}"
+    },
+    {
+      "file": "src/pages/SchedulePage.tsx",
+      "line": 19,
+      "path": "/api/operations/jobs"
+    },
+    {
+      "file": "src/pages/SchedulePage.tsx",
+      "line": 20,
+      "path": "/api/operations/appointments?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}"
+    }
+  ],
+  "backendRoutes": [
+    {
+      "file": "server/routes/assets.ts",
+      "line": 21,
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "file": "server/routes/assets.ts",
+      "line": 31,
+      "method": "POST",
+      "path": "/"
+    },
+    {
+      "file": "server/routes/assets.ts",
+      "line": 40,
+      "method": "PATCH",
+      "path": "/:id"
+    },
+    {
+      "file": "server/routes/billing.ts",
+      "line": 95,
+      "method": "POST",
+      "path": "/webhook"
+    },
+    {
+      "file": "server/routes/billing.ts",
+      "line": 197,
+      "method": "GET",
+      "path": "/status"
+    },
+    {
+      "file": "server/routes/billing.ts",
+      "line": 212,
+      "method": "POST",
+      "path": "/checkout"
+    },
+    {
+      "file": "server/routes/billing.ts",
+      "line": 270,
+      "method": "GET",
+      "path": "/checkout-status"
+    },
+    {
+      "file": "server/routes/billing.ts",
+      "line": 280,
+      "method": "POST",
+      "path": "/portal"
+    },
+    {
+      "file": "server/routes/businessBrain.ts",
+      "line": 11,
+      "method": "GET",
+      "path": "/memories"
+    },
+    {
+      "file": "server/routes/businessBrain.ts",
+      "line": 17,
+      "method": "GET",
+      "path": "/memories/:id"
+    },
+    {
+      "file": "server/routes/businessBrain.ts",
+      "line": 26,
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "file": "server/routes/businessBrain.ts",
+      "line": 32,
+      "method": "PUT",
+      "path": "/settings"
+    },
+    {
+      "file": "server/routes/businessBrain.ts",
+      "line": 37,
+      "method": "POST",
+      "path": "/feedback"
+    },
+    {
+      "file": "server/routes/businessBrain.ts",
+      "line": 45,
+      "method": "POST",
+      "path": "/memories/:id/decision"
+    },
+    {
+      "file": "server/routes/businessBrain.ts",
+      "line": 53,
+      "method": "GET",
+      "path": "/metrics"
+    },
+    {
+      "file": "server/routes/communications.ts",
+      "line": 94,
+      "method": "POST",
+      "path": "/incoming"
+    },
+    {
+      "file": "server/routes/communications.ts",
+      "line": 144,
+      "method": "POST",
+      "path": "/status"
+    },
+    {
+      "file": "server/routes/communications.ts",
+      "line": 169,
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "file": "server/routes/communications.ts",
+      "line": 178,
+      "method": "GET",
+      "path": "/conversations/:id"
+    },
+    {
+      "file": "server/routes/communications.ts",
+      "line": 190,
+      "method": "POST",
+      "path": "/conversations/:id/notes"
+    },
+    {
+      "file": "server/routes/communications.ts",
+      "line": 201,
+      "method": "POST",
+      "path": "/consents"
+    },
+    {
+      "file": "server/routes/communications.ts",
+      "line": 210,
+      "method": "POST",
+      "path": "/sms"
+    },
+    {
+      "file": "server/routes/communications.ts",
+      "line": 248,
+      "method": "GET",
+      "path": "/campaigns"
+    },
+    {
+      "file": "server/routes/communications.ts",
+      "line": 259,
+      "method": "POST",
+      "path": "/campaigns"
+    },
+    {
+      "file": "server/routes/communications.ts",
+      "line": 267,
+      "method": "POST",
+      "path": "/campaigns/:id/prepare"
+    },
+    {
+      "file": "server/routes/communications.ts",
+      "line": 300,
+      "method": "POST",
+      "path": "/campaigns/:id/approve"
+    },
+    {
+      "file": "server/routes/communications.ts",
+      "line": 309,
+      "method": "POST",
+      "path": "/campaigns/:id/send"
+    },
+    {
+      "file": "server/routes/crm.ts",
+      "line": 28,
+      "method": "GET",
+      "path": "/customers"
+    },
+    {
+      "file": "server/routes/crm.ts",
+      "line": 43,
+      "method": "GET",
+      "path": "/customers/:id"
+    },
+    {
+      "file": "server/routes/crm.ts",
+      "line": 63,
+      "method": "POST",
+      "path": "/customers"
+    },
+    {
+      "file": "server/routes/crm.ts",
+      "line": 91,
+      "method": "GET",
+      "path": "/leads"
+    },
+    {
+      "file": "server/routes/crm.ts",
+      "line": 106,
+      "method": "POST",
+      "path": "/leads"
+    },
+    {
+      "file": "server/routes/crm.ts",
+      "line": 125,
+      "method": "PATCH",
+      "path": "/leads/:id/stage"
+    },
+    {
+      "file": "server/routes/dashboard.ts",
+      "line": 8,
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "file": "server/routes/hiring.ts",
+      "line": 56,
+      "method": "GET",
+      "path": "/openings"
+    },
+    {
+      "file": "server/routes/hiring.ts",
+      "line": 68,
+      "method": "POST",
+      "path": "/openings"
+    },
+    {
+      "file": "server/routes/hiring.ts",
+      "line": 76,
+      "method": "GET",
+      "path": "/applications"
+    },
+    {
+      "file": "server/routes/hiring.ts",
+      "line": 93,
+      "method": "POST",
+      "path": "/candidates"
+    },
+    {
+      "file": "server/routes/hiring.ts",
+      "line": 105,
+      "method": "POST",
+      "path": "/applications"
+    },
+    {
+      "file": "server/routes/hiring.ts",
+      "line": 116,
+      "method": "PATCH",
+      "path": "/applications/:id/notes"
+    },
+    {
+      "file": "server/routes/hiring.ts",
+      "line": 127,
+      "method": "PATCH",
+      "path": "/applications/:id/stage"
+    },
+    {
+      "file": "server/routes/integrations.ts",
+      "line": 9,
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "file": "server/routes/integrations.ts",
+      "line": 16,
+      "method": "POST",
+      "path": "/twilio/activate"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 10,
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 19,
+      "method": "GET",
+      "path": "/conversations/:id/messages"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 28,
+      "method": "GET",
+      "path": "/knowledge"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 35,
+      "method": "POST",
+      "path": "/knowledge"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 49,
+      "method": "GET",
+      "path": "/approvals"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 56,
+      "method": "POST",
+      "path": "/approvals/:id/decision"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 65,
+      "method": "GET",
+      "path": "/ai-actions"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 74,
+      "method": "GET",
+      "path": "/capabilities"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 92,
+      "method": "GET",
+      "path": "/automations"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 106,
+      "method": "POST",
+      "path": "/automations"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 115,
+      "method": "POST",
+      "path": "/automations/:id/status"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 121,
+      "method": "POST",
+      "path": "/automations/:id/run"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 129,
+      "method": "GET",
+      "path": "/automation-runs"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 134,
+      "method": "GET",
+      "path": "/reviews"
+    },
+    {
+      "file": "server/routes/intelligence.ts",
+      "line": 141,
+      "method": "GET",
+      "path": "/attribution"
+    },
+    {
+      "file": "server/routes/notifications.ts",
+      "line": 9,
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "file": "server/routes/notifications.ts",
+      "line": 19,
+      "method": "POST",
+      "path": "/read-all"
+    },
+    {
+      "file": "server/routes/notifications.ts",
+      "line": 26,
+      "method": "POST",
+      "path": "/:id/read"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 14,
+      "method": "GET",
+      "path": "/appointments"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 25,
+      "method": "POST",
+      "path": "/appointments"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 52,
+      "method": "GET",
+      "path": "/jobs"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 61,
+      "method": "GET",
+      "path": "/jobs/:id"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 86,
+      "method": "POST",
+      "path": "/jobs"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 105,
+      "method": "PATCH",
+      "path": "/jobs/:id/schedule"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 133,
+      "method": "POST",
+      "path": "/jobs/:id/time"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 157,
+      "method": "PATCH",
+      "path": "/jobs/:id/time/:entryId"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 175,
+      "method": "POST",
+      "path": "/jobs/:id/materials"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 198,
+      "method": "DELETE",
+      "path": "/jobs/:id/materials/:materialId"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 211,
+      "method": "POST",
+      "path": "/jobs/:id/photos"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 231,
+      "method": "GET",
+      "path": "/jobs/:id/photos"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 244,
+      "method": "DELETE",
+      "path": "/jobs/:id/photos/:photoName"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 253,
+      "method": "GET",
+      "path": "/jobs/:id/checklists"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 260,
+      "method": "POST",
+      "path": "/jobs/:id/checklists"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 279,
+      "method": "POST",
+      "path": "/jobs/:id/signatures"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 295,
+      "method": "GET",
+      "path": "/jobs/:id/signatures"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 303,
+      "method": "GET",
+      "path": "/jobs/:id/report"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 331,
+      "method": "PATCH",
+      "path": "/jobs/:id/status"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 357,
+      "method": "GET",
+      "path": "/quotes"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 387,
+      "method": "POST",
+      "path": "/quotes"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 434,
+      "method": "PATCH",
+      "path": "/quotes/:id/send"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 469,
+      "method": "POST",
+      "path": "/quotes/:id/link"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 482,
+      "method": "PATCH",
+      "path": "/quotes/:id/void"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 495,
+      "method": "POST",
+      "path": "/quotes/:id/convert"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 528,
+      "method": "GET",
+      "path": "/invoices"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 535,
+      "method": "POST",
+      "path": "/invoices"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 557,
+      "method": "PATCH",
+      "path": "/invoices/:id/send"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 603,
+      "method": "GET",
+      "path": "/payments"
+    },
+    {
+      "file": "server/routes/operations.ts",
+      "line": 610,
+      "method": "POST",
+      "path": "/invoices/:id/checkout"
+    },
+    {
+      "file": "server/routes/operator.ts",
+      "line": 9,
+      "method": "POST",
+      "path": "/command"
+    },
+    {
+      "file": "server/routes/public.ts",
+      "line": 43,
+      "method": "GET",
+      "path": "/quotes/:token"
+    },
+    {
+      "file": "server/routes/public.ts",
+      "line": 88,
+      "method": "POST",
+      "path": "/quotes/:token/decision"
+    },
+    {
+      "file": "server/routes/public.ts",
+      "line": 196,
+      "method": "GET",
+      "path": "/book/:slug"
+    },
+    {
+      "file": "server/routes/public.ts",
+      "line": 214,
+      "method": "POST",
+      "path": "/book/:slug"
+    },
+    {
+      "file": "server/routes/receptionist.ts",
+      "line": 38,
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "file": "server/routes/receptionist.ts",
+      "line": 48,
+      "method": "GET",
+      "path": "/calls"
+    },
+    {
+      "file": "server/routes/receptionist.ts",
+      "line": 57,
+      "method": "GET",
+      "path": "/calls/:id"
+    },
+    {
+      "file": "server/routes/receptionist.ts",
+      "line": 69,
+      "method": "PUT",
+      "path": "/"
+    },
+    {
+      "file": "server/routes/receptionist.ts",
+      "line": 100,
+      "method": "POST",
+      "path": "/simulate"
+    },
+    {
+      "file": "server/routes/receptionist.ts",
+      "line": 106,
+      "method": "POST",
+      "path": "/voice"
+    },
+    {
+      "file": "server/routes/receptionist.ts",
+      "line": 149,
+      "method": "POST",
+      "path": "/voice/complete"
+    },
+    {
+      "file": "server/routes/receptionist.ts",
+      "line": 173,
+      "method": "POST",
+      "path": "/voice/transfer-complete"
+    },
+    {
+      "file": "server/routes/services.ts",
+      "line": 22,
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "file": "server/routes/services.ts",
+      "line": 29,
+      "method": "POST",
+      "path": "/"
+    },
+    {
+      "file": "server/routes/team.ts",
+      "line": 13,
+      "method": "POST",
+      "path": "/invites/accept"
+    },
+    {
+      "file": "server/routes/team.ts",
+      "line": 43,
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "file": "server/routes/team.ts",
+      "line": 83,
+      "method": "POST",
+      "path": "/invites"
+    },
+    {
+      "file": "server/routes/workspaces.ts",
+      "line": 10,
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "file": "server/routes/workspaces.ts",
+      "line": 26,
+      "method": "POST",
+      "path": "/"
+    },
+    {
+      "file": "server/routes/workspaces.ts",
+      "line": 42,
+      "method": "GET",
+      "path": "/current"
+    },
+    {
+      "file": "server/routes/workspaces.ts",
+      "line": 53,
+      "method": "PUT",
+      "path": "/business-profile"
+    },
+    {
+      "file": "server/routes/workspaces.ts",
+      "line": 78,
+      "method": "GET",
+      "path": "/onboarding"
+    }
+  ]
+}

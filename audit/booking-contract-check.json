@@ -1,0 +1,8 @@
+{
+  "case": "Exact slot-preview payload shape from PublicBookingPage",
+  "expected": "Slot list (or business-not-found after lookup)",
+  "status": 400,
+  "body": {
+    "error": "VALIDATION_FAILED"
+  }
+}
