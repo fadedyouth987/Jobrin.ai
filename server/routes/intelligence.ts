@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncRoute, validateBody } from '../security';
-import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest, writeAudit } from '../supabase';
+import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
 import { operatorTools, toolByName } from '../ai/toolRegistry';
 
 const router = Router();
@@ -59,6 +59,27 @@ router.post('/approvals/:id/decision', requireRole('owner','admin','manager'), v
   if (error) return res.status(400).json({ error: 'APPROVAL_DECISION_FAILED' });
   if (!data) return res.status(409).json({ error: 'APPROVAL_ALREADY_DECIDED_OR_MISSING' });
   await writeAudit(req, `approval.${req.body.decision}`, 'approval', data.id);
+
+  // An approval decision must actually move the thing it was blocking: an
+  // automation run paused in 'waiting' otherwise sits stuck forever even once
+  // decided (automation_runs has no UPDATE grant for `authenticated`, so this
+  // goes through the service-role client, gated on the decision we just made).
+  if (data.resource_type === 'automation_step' && data.resource_id) {
+    if (req.body.decision === 'approved') {
+      await supabaseAdmin.from('automation_runs')
+        .update({ status: 'queued', next_attempt_at: new Date().toISOString(), last_error: null })
+        .eq('workspace_id', req.workspaceId!).eq('id', data.resource_id).eq('status', 'waiting');
+    } else {
+      await supabaseAdmin.from('automation_runs')
+        .update({ status: 'cancelled', completed_at: new Date().toISOString(), last_error: 'APPROVAL_REJECTED' })
+        .eq('workspace_id', req.workspaceId!).eq('id', data.resource_id).eq('status', 'waiting');
+    }
+  }
+  if (data.ai_action_id) {
+    await supabaseAdmin.from('ai_actions')
+      .update({ status: req.body.decision === 'approved' ? 'running' : 'denied', completed_at: req.body.decision === 'approved' ? null : new Date().toISOString() })
+      .eq('workspace_id', req.workspaceId!).eq('id', data.ai_action_id);
+  }
   res.json({ approval: data });
 }));
 
@@ -119,10 +140,24 @@ router.post('/automations/:id/status',requireRole('owner','admin','manager'),val
 }));
 
 router.post('/automations/:id/run',requireRole('owner','admin','manager'),asyncRoute(async(req:AuthenticatedRequest,res)=>{
-  const db=createUserClient(req.auth!.accessToken);const {data:automation}=await db.from('automations').select('id,status,retry_policy').eq('workspace_id',req.workspaceId!).eq('id',req.params.id).maybeSingle();
+  // Membership (requireWorkspace), role (requireRole above) and the workspace's
+  // plan entitlement to run automations (requireActiveSubscription('ai.basic')
+  // on the router) are already enforced before this handler runs. We still read
+  // the automation through the user's own RLS-scoped client so a caller can never
+  // read/act on another workspace's row even if a check above were misconfigured.
+  const db=createUserClient(req.auth!.accessToken);const {data:automation}=await db.from('automations').select('id,status,definition,retry_policy').eq('workspace_id',req.workspaceId!).eq('id',req.params.id).maybeSingle();
   if(!automation)return res.status(404).json({error:'AUTOMATION_NOT_FOUND'});if(automation.status!=='active')return res.status(409).json({error:'AUTOMATION_NOT_ACTIVE'});
+  // Defense in depth: re-validate every step's tool against the current allowed
+  // tool set at run time, not just at creation time — a tool's risk can change
+  // (e.g. be retired to 'prohibited') after an automation was saved.
+  const steps=(automation.definition as any)?.steps as Array<{tool:string}> | undefined;
+  const disallowed=(steps??[]).find((step)=>!operatorTools.some((tool)=>tool.name===step.tool)||operatorTools.find((tool)=>tool.name===step.tool)?.risk==='prohibited');
+  if(disallowed)return res.status(400).json({error:'AUTOMATION_TOOL_NOT_ALLOWED',tool:disallowed.tool});
   const key=`manual:${automation.id}:${req.requestId}`;const maxAttempts=Number((automation.retry_policy as any)?.maxAttempts||5);
-  const {data,error}=await db.from('automation_runs').insert({workspace_id:req.workspaceId!,automation_id:automation.id,idempotency_key:key,max_attempts:maxAttempts,state:{source:'manual',requestedBy:req.auth!.userId}}).select('*').single();
+  // automation_runs has no INSERT grant for the `authenticated` role (see
+  // supabase/migrations/0005_least_privilege_rbac.sql) — writes to it must go
+  // through the service-role client, only after the authorization checks above.
+  const {data,error}=await supabaseAdmin.from('automation_runs').insert({workspace_id:req.workspaceId!,automation_id:automation.id,idempotency_key:key,max_attempts:maxAttempts,state:{source:'manual',requestedBy:req.auth!.userId}}).select('*').single();
   if(error)return res.status(400).json({error:'AUTOMATION_QUEUE_FAILED',message:error.message});await writeAudit(req,'automation.run_queued','automation_run',data.id);res.status(202).json({run:data});
 }));
 

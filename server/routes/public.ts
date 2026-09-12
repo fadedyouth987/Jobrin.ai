@@ -211,30 +211,41 @@ router.get('/book/:slug', asyncRoute(async (req, res) => {
   });
 }));
 
+// A peek request only checks available times for a service — no customer
+// details or chosen time exist yet, so those fields must not be required.
+// A real booking-creation request needs the customer's name, phone and the
+// slot they picked. Using the `peek` flag to pick between two schemas (rather
+// than one schema with universally-required fields) keeps each request kind
+// validated against only the fields it actually sends.
+const peekBookingSchema = z.object({
+  peek: z.literal(true),
+  service_id: z.string().uuid(),
+});
+const createBookingSchema = z.object({
+  peek: z.literal(false).optional(),
+  service_id: z.string().uuid(),
+  customer_name: z.string().trim().min(2).max(160),
+  phone: z.string().trim().min(8).max(40),
+  email: z.string().trim().email().max(254).nullable().optional(),
+  address_text: z.string().trim().max(500).nullable().optional(),
+  slot_start: z.string().datetime(),
+});
+
 router.post('/book/:slug', asyncRoute(async (req, res) => {
   const slug = String(req.params.slug || '').toLowerCase();
   if (!/^[a-z0-9-]{3,63}$/.test(slug)) return res.status(404).json({ error: 'BUSINESS_NOT_FOUND' });
-  const parsed = z.object({
-    service_id: z.string().uuid(),
-    customer_name: z.string().trim().min(2).max(160),
-    phone: z.string().trim().min(8).max(40),
-    email: z.string().trim().email().max(254).nullable().optional(),
-    address_text: z.string().trim().max(500).nullable().optional(),
-    slot_start: z.string().datetime().optional(),
-    peek: z.boolean().optional(),
-  }).safeParse(req.body);
+  const isPeek = !!req.body && typeof req.body === 'object' && (req.body as Record<string, unknown>).peek === true;
+  const parsed = isPeek ? peekBookingSchema.safeParse(req.body) : createBookingSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'VALIDATION_FAILED' });
-  const input = parsed.data;
 
   const { data: workspace } = await supabaseAdmin.from('workspaces').select('id,name,slug').eq('slug', slug).maybeSingle();
   if (!workspace) return res.status(404).json({ error: 'BUSINESS_NOT_FOUND' });
-  const { data: service } = await supabaseAdmin.from('services').select('id,name,default_duration_minutes,booking_type,requires_deposit,deposit_cents').eq('workspace_id', workspace.id).eq('id', input.service_id).maybeSingle();
+  const { data: service } = await supabaseAdmin.from('services').select('id,name,default_duration_minutes,booking_type,requires_deposit,deposit_cents').eq('workspace_id', workspace.id).eq('id', parsed.data.service_id).maybeSingle();
   if (!service || service.booking_type !== 'bookable') return res.status(404).json({ error: 'SERVICE_NOT_FOUND' });
 
-  const slotStart = new Date(input.slot_start);
-  const slotEnd = new Date(slotStart.getTime() + Number(service.default_duration_minutes || 60) * 60_000);
-  if (Number.isNaN(slotStart.getTime())) return res.status(400).json({ error: 'INVALID_SLOT' });
-
+  // Slot search always defaults to "starting now, next N days" — a peek
+  // request has no slot_start to validate, and shouldn't need one just to
+  // find out what times are available.
   const [rulesResult, busyAppointments, busyJobs] = await Promise.all([
     supabaseAdmin.from('business_hours').select('weekday,opens_at,closes_at,closed').eq('workspace_id', workspace.id).in('schedule_type', ['booking', 'business']),
     supabaseAdmin.from('appointments').select('starts_at,ends_at').eq('workspace_id', workspace.id).in('status', ['hold', 'scheduled', 'confirmed']).gte('starts_at', new Date(Date.now() - 86_400_000).toISOString()),
@@ -245,45 +256,58 @@ router.post('/book/:slug', asyncRoute(async (req, res) => {
     ...(busyJobs.data ?? []).filter((row: any) => row.scheduled_end).map((row: any) => ({ start: row.scheduled_start, end: row.scheduled_end })),
   ];
   const offered = generateBookingSlots((rulesResult.data ?? []) as BusinessHourRule[], Number(service.default_duration_minutes || 60), new Date(), busyRanges);
-  if (input.peek || !input.slot_start) return res.json({ slots: offered });
+  if (isPeek) return res.json({ slots: offered });
+
+  const input = (parsed as z.SafeParseSuccess<z.infer<typeof createBookingSchema>>).data;
+  const slotStart = new Date(input.slot_start);
+  const slotEnd = new Date(slotStart.getTime() + Number(service.default_duration_minutes || 60) * 60_000);
+  if (Number.isNaN(slotStart.getTime())) return res.status(400).json({ error: 'INVALID_SLOT' });
   if (!offered.some((slot) => slot.start === slotStart.toISOString())) {
     return res.status(409).json({ error: 'SLOT_TAKEN', message: 'That time was just booked. Please choose another time.' });
   }
 
   const phone = normalizeE164(input.phone);
   if (!/^\+[1-9]\d{7,14}$/.test(phone)) return res.status(400).json({ error: 'VALIDATION_FAILED' });
-  let customerId: string | null = null;
-  const { data: existing } = await supabaseAdmin.from('customers').select('id').eq('workspace_id', workspace.id).eq('normalized_phone', phone).is('deleted_at', null).maybeSingle();
-  customerId = existing?.id ?? null;
-  if (!customerId) {
-    const created = await supabaseAdmin.from('customers').insert({
-      workspace_id: workspace.id, display_name: input.customer_name, phone, normalized_phone: phone,
-      email: input.email || null, source: 'public_booking',
-    }).select('id').single();
-    customerId = created.data?.id ?? null;
+
+  // The customer/appointment/job creation, plus the atomic slot-conflict
+  // recheck, all happen inside one Postgres function so a partial failure
+  // can't leave an orphan row and two concurrent requests for the same slot
+  // can't both succeed (appointments_no_staff_overlap only guards rows with
+  // assigned_user_id set, which public bookings never have).
+  const idempotencyKey = crypto.createHash('sha256')
+    .update(`${workspace.id}:${phone}:${slotStart.toISOString()}`, 'utf8')
+    .digest('hex');
+  const { data: booking, error: bookingError } = await supabaseAdmin.rpc('create_public_booking', {
+    p_workspace_id: workspace.id,
+    p_service_id: service.id,
+    p_customer_name: input.customer_name,
+    p_phone: input.phone,
+    p_normalized_phone: phone,
+    p_email: input.email || null,
+    p_address_text: input.address_text || null,
+    p_starts_at: slotStart.toISOString(),
+    p_ends_at: slotEnd.toISOString(),
+    p_idempotency_key: idempotencyKey,
+  }).single() as { data: { appointment_id: string; job_id: string; customer_id: string } | null; error: { message: string } | null };
+
+  if (bookingError || !booking) {
+    const message = bookingError?.message || '';
+    if (message.includes('SLOT_TAKEN')) {
+      return res.status(409).json({ error: 'SLOT_TAKEN', message: 'That time was just booked. Please choose another time.' });
+    }
+    if (message.includes('SERVICE_NOT_FOUND')) return res.status(404).json({ error: 'SERVICE_NOT_FOUND' });
+    return res.status(500).json({ error: 'BOOKING_CREATE_FAILED' });
   }
 
-  const [appointment, job] = await Promise.all([
-    supabaseAdmin.from('appointments').insert({
-      workspace_id: workspace.id, customer_id: customerId, title: service.name,
-      starts_at: slotStart.toISOString(), ends_at: slotEnd.toISOString(),
-      address_text: input.address_text || null, status: 'scheduled', source: 'public_booking',
-    }).select('id').single(),
-    supabaseAdmin.from('jobs').insert({
-      workspace_id: workspace.id, customer_id: customerId, title: service.name,
-      address_text: input.address_text || null, scheduled_start: slotStart.toISOString(), scheduled_end: slotEnd.toISOString(), status: 'new',
-    }).select('id').single(),
-  ]);
-  if (appointment.error || job.error) return res.status(500).json({ error: 'BOOKING_CREATE_FAILED' });
   await supabaseAdmin.from('audit_logs').insert({
-    workspace_id: workspace.id, action: 'booking.public_created', entity_type: 'appointment', entity_id: appointment.data?.id ?? null,
+    workspace_id: workspace.id, action: 'booking.public_created', entity_type: 'appointment', entity_id: booking.appointment_id ?? null,
     details: { via: 'public_booking', service: service.name }, ip_address: req.ip,
   });
   try {
     await supabaseAdmin.from('notifications').insert({
       workspace_id: workspace.id, type: 'booking.created',
       title: 'New online booking', body: `${input.customer_name} booked ${service.name} at ${slotStart.toLocaleString('en-AU', { timeZone: 'Australia/Adelaide', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.`,
-      resource_type: 'appointment', resource_id: appointment.data?.id ?? null,
+      resource_type: 'appointment', resource_id: booking.appointment_id ?? null,
     });
   } catch { /* best-effort */ }
 

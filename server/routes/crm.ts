@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncRoute, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest, writeAudit, writeNotification } from '../supabase';
+import { queueAutomationRun } from '../automation/runner';
 
 const router = Router();
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('crm.core'));
@@ -109,6 +110,9 @@ router.post('/leads', requireRole('owner','admin','manager','staff'), validateBo
   if (error) return res.status(400).json({ error: 'LEAD_CREATE_FAILED', message: error.message });
   await writeAudit(req, 'lead.created', 'lead', data.id);
   await writeNotification(req.workspaceId!, 'lead.created', 'New lead needs a response', `${data.title} — move it through the pipeline while it is fresh.`, 'lead', data.id);
+  // Best-effort: fires any active "new lead" automations with real
+  // leadId/customerId/serviceIds inputs. Never allowed to break this request.
+  void queueAutomationRun(req.workspaceId!, 'lead.created', { leadId: data.id, customerId: data.customer_id ?? null, serviceIds: data.service_id ? [data.service_id] : [] }).catch(() => {});
   res.status(201).json({ lead: data });
 }));
 
