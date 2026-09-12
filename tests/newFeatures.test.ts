@@ -86,8 +86,32 @@ test('team invitations need owner or admin, sensitive auth and the service role'
   assert.match(teamSource, /requireSensitiveAuth/);
   assert.match(teamSource, /INVITES_REQUIRE_SERVICE_ROLE/);
   assert.match(teamSource, /ONLY_OWNER_CAN_INVITE_ADMINS/);
-  assert.match(teamSource, /inviteUserByEmail/);
+  assert.match(teamSource, /generateLink\(\{[\s\S]*type: 'invite'/);
+  assert.doesNotMatch(teamSource, /inviteUserByEmail|auth\.admin\.createUser/);
+  assert.match(teamSource, /status: 'invited'/);
+  assert.match(teamSource, /delivery: 'manual', setupUrl/);
+  assert.match(teamSource, /team\.invite_accepted/);
   assert.match(teamSource, /team\.member_invited/);
+});
+
+test('team invite UI is truthful about manual delivery and pending access', () => {
+  const teamUi = source('src/pages/AppPages.tsx');
+  const acceptUi = source('src/pages/AcceptInvitePage.tsx');
+  assert.match(teamUi, /No email was sent/);
+  assert.match(teamUi, /Create setup link/);
+  assert.match(teamUi, /awaiting account setup/);
+  assert.doesNotMatch(teamUi, /Invitation sent to/);
+  assert.match(acceptUi, /updatePassword\(password\)/);
+  assert.match(acceptUi, /\/api\/team\/invites\/accept/);
+});
+
+test('full journey covers setup-link verification through usable member login', () => {
+  const journey = source('e2e-full-journey.mts');
+  assert.match(journey, /team setup link created without email/);
+  assert.match(journey, /\/auth\/v1\/verify/);
+  assert.match(journey, /invited member sets password/);
+  assert.match(journey, /\/api\/team\/invites\/accept/);
+  assert.match(journey, /invited member can sign in and use workspace/);
 });
 
 test('automation steps are classified before anything executes', () => {
@@ -114,7 +138,7 @@ test('the automation runner claims atomically, retries and dead-letters', () => 
   assert.match(runnerSource, /approvals'\)\.insert/);
   // Denied tools must be rejected before the executor is reached.
   const deniedAt = runnerSource.indexOf("classified.stepClass === 'denied'");
-  const executeAt = runnerSource.indexOf('executeAutomaticStep(run.workspace_id, step)');
+  const executeAt = runnerSource.indexOf('executeAutomaticStep(run.workspace_id, { tool: step.tool, input })');
   assert.ok(deniedAt >= 0);
   assert.ok(executeAt > deniedAt);
 });

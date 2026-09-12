@@ -5,6 +5,39 @@ import { createUserClient, requireActiveSubscription, requireAuth, requireRole, 
 import { env } from '../env';
 
 const router = Router();
+
+// Invite acceptance deliberately sits outside requireWorkspace: an invited
+// member does not have active workspace access until this endpoint succeeds.
+// Identity still comes from the verified Supabase invite session, and the
+// update is constrained to that user's own pending membership.
+router.post('/invites/accept', requireAuth, validateBody(z.object({}).strict()), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  if (!env.SUPABASE_SERVICE_ROLE_KEY) {
+    return res.status(503).json({ error: 'INVITES_REQUIRE_SERVICE_ROLE' });
+  }
+
+  const { data: pending, error: readError } = await supabaseAdmin
+    .from('workspace_members')
+    .select('workspace_id,user_id,role,status')
+    .eq('user_id', req.auth!.userId)
+    .eq('status', 'invited');
+  if (readError) return res.status(500).json({ error: 'INVITE_ACCEPT_FAILED' });
+  if (!pending?.length) return res.status(404).json({ error: 'INVITE_NOT_FOUND', message: 'This invitation is no longer available.' });
+
+  const { data: members, error: updateError } = await supabaseAdmin
+    .from('workspace_members')
+    .update({ status: 'active' })
+    .eq('user_id', req.auth!.userId)
+    .eq('status', 'invited')
+    .select('workspace_id,user_id,role,status,created_at');
+  if (updateError) return res.status(500).json({ error: 'INVITE_ACCEPT_FAILED' });
+
+  for (const member of members ?? []) {
+    req.workspaceId = member.workspace_id;
+    await writeAudit(req, 'team.invite_accepted', 'workspace_member', req.auth!.userId, { role: member.role }, 'info');
+  }
+  res.json({ members, accepted: true });
+}));
+
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('crm.core'));
 
 router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
@@ -65,29 +98,30 @@ router.post('/invites', requireRole('owner', 'admin'), requireSensitiveAuth, val
   if (existingError) return res.status(500).json({ error: 'TEAM_LIST_FAILED' });
   void existing;
 
-  // Resolve the invitee's auth user, inviting them if they are brand new.
-  const invite = await supabaseAdmin.auth.admin.createUser({
+  const acceptUrl = new URL('/accept-invite', env.APP_URL);
+
+  // Generate an expiring Supabase invite credential without asking Supabase to
+  // send email. This preserves the existing protection against SMTP/rate-limit
+  // failures while giving the owner an explicit secure handoff to the member.
+  const invite = await supabaseAdmin.auth.admin.generateLink({
+    type: 'invite',
     email: req.body.email,
-    email_confirm: true,
-    user_metadata: { display_name: req.body.display_name || req.body.email.split('@')[0] },
+    options: {
+      redirectTo: acceptUrl.toString(),
+      data: { display_name: req.body.display_name || req.body.email.split('@')[0] },
+    },
   });
   if (invite.error) {
     if (/already been registered/i.test(invite.error.message)) {
       return res.status(409).json({ error: 'EMAIL_ALREADY_REGISTERED', message: 'That email already has a Jobrin.ai login. Ask them to sign in, then add them from this page once account linking is available.' });
     }
-    return res.status(502).json({ error: 'INVITE_SEND_FAILED' });
+    return res.status(502).json({ error: 'INVITE_LINK_CREATE_FAILED', message: 'No invitation was created. Try again.' });
   }
-  const userId = (invite.data as { id?: string })?.id ?? null;
-  if (!userId) return res.status(502).json({ error: "INVITE_SEND_FAILED" });
-  if (!userId) return res.status(502).json({ error: 'INVITE_SEND_FAILED' });
-
-  const { data: members, error: memberReadError } = await supabaseAdmin
-    .from('workspace_members')
-    .select('user_id')
-    .eq('workspace_id', req.workspaceId!);
-  if (memberReadError) return res.status(500).json({ error: 'TEAM_LIST_FAILED' });
-  if (members?.some((member: any) => member.user_id === userId)) {
-    return res.status(409).json({ error: 'ALREADY_A_MEMBER' });
+  const userId = invite.data.user?.id ?? null;
+  const setupUrl = invite.data.properties?.action_link ?? null;
+  if (!userId || !setupUrl) {
+    if (userId) await supabaseAdmin.auth.admin.deleteUser(userId);
+    return res.status(502).json({ error: 'INVITE_LINK_CREATE_FAILED' });
   }
 
   if (req.body.display_name) {
@@ -95,12 +129,16 @@ router.post('/invites', requireRole('owner', 'admin'), requireSensitiveAuth, val
   }
   const { data: member, error: insertError } = await supabaseAdmin
     .from('workspace_members')
-    .insert({ workspace_id: req.workspaceId!, user_id: userId, role: req.body.role, status: 'active' })
+    .insert({ workspace_id: req.workspaceId!, user_id: userId, role: req.body.role, status: 'invited' })
     .select('user_id,role,status,created_at').single();
-  if (insertError) return res.status(400).json({ error: 'TEAM_MEMBER_CREATE_FAILED', message: insertError.message });
+  if (insertError) {
+    // Do not strand a login without a membership when the second half fails.
+    await supabaseAdmin.auth.admin.deleteUser(userId);
+    return res.status(400).json({ error: 'TEAM_MEMBER_CREATE_FAILED', message: insertError.message });
+  }
 
-  await writeAudit(req, 'team.member_invited', 'workspace_member', userId, { role: req.body.role }, 'warning');
-  res.status(201).json({ member, invited: true });
+  await writeAudit(req, 'team.member_invited', 'workspace_member', userId, { role: req.body.role, delivery: 'manual' }, 'warning');
+  res.status(201).json({ member, invited: true, delivery: 'manual', setupUrl });
 }));
 
 export default router;

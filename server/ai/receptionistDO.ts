@@ -1,79 +1,77 @@
-// Durable Object for the AI receptionist: one DO per call, deterministically
-// named from the Twilio CallSid. Owns only that call's state — the turn
-// ledger, active tool action, caller consent state and handoff state. Uses
-// the hibernating WebSocket API so the DO stays alive without billing for
-// idle time, and SQLite for durable call state per the architecture doc.
-//
-// In the local Node runtime, the same session logic runs via
-// server/ws/receptionistSocket.ts (no DO available).
-
 import { ReceptionistSession } from './receptionistCall';
 
-export class ReceptionistCallDO {
-  private session: ReceptionistSession | null = null;
+type SocketAttachment = { workspaceId: string; callSid: string; toNumber: string; snapshotHash: string };
+type StoredState = ReturnType<ReceptionistSession['exportState']>;
 
+// One hibernating Durable Object per call. Only serializable state is stored;
+// every wake recreates the policy engine against the signed, frozen snapshot.
+export class ReceptionistCallDO {
   constructor(private state: DurableObjectState, private env: unknown) {}
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === '/ws') {
-      return this.handleWebSocket(request);
-    }
-    return new Response('Not found', { status: 404 });
-  }
-
-  private async handleWebSocket(request: Request): Promise<Response> {
-    const sockets = Object.values(new WebSocketPair() as unknown as Record<number, unknown>);
-    const client = sockets[0] as WebSocket;
-    const server = sockets[1] as {
-      accept: () => void;
-      send: (data: string) => void;
-      addEventListener: (type: string, listener: (event: MessageEvent | CloseEvent) => void) => void;
+    if (url.pathname !== '/ws' || request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return new Response('Not found', { status: 404 });
+    const attachment: SocketAttachment = {
+      workspaceId: url.searchParams.get('w') || '', callSid: url.searchParams.get('c') || '',
+      toNumber: url.searchParams.get('t') || '', snapshotHash: url.searchParams.get('h') || '',
     };
-
-    // Hibernating WebSocket API: the DO stays alive between messages without
-    // billing, and call state persists in SQLite across hibernation cycles.
-    this.state.acceptWebSocket(server as never);
-
-    const url = new URL(request.url);
-    const workspaceId = url.searchParams.get('w') || '';
-    const callSid = url.searchParams.get('c') || '';
-    const fromNumber = url.searchParams.get('from') || null;
-
-    const session = new ReceptionistSession({ workspaceId, callSid, fromNumber, mode: 'receptionist' });
-    this.session = session;
-
-    server.addEventListener('message', (event) => {
-      void (async () => {
-        let parsed: { type?: string; voicePrompt?: string; customParameters?: Record<string, string> };
-        try { parsed = JSON.parse(String((event as MessageEvent).data)) as typeof parsed; } catch { return; }
-        if (parsed.type === 'setup') {
-          const from = parsed.customParameters?.fromNumber || parsed.customParameters?.From || null;
-          if (from) session.fromNumber = from;
-          await session.loadContext().finally(() => undefined);
-          const greeting = session.greeting();
-          this.sendSafe(server, greeting);
-          return;
-        }
-        if (parsed.type === 'prompt') {
-          const userText = String(parsed.voicePrompt || '').slice(0, 1000);
-          if (!userText.trim()) return;
-          const result = await session.handleUserText(userText).catch(() => null);
-          const reply = (result && result.reply) || 'Sorry, could you say that again for me?';
-          this.sendSafe(server, { type: 'text', token: reply, last: true });
-          return;
-        }
-      })();
-    });
-
-    server.addEventListener('close', () => {
-      void session.finalize().then(() => undefined, () => undefined);
-    });
-
-    return new Response(null, { status: 101, webSocket: client as never });
+    if (!attachment.workspaceId || !attachment.callSid || !attachment.toNumber || !attachment.snapshotHash) return new Response('Unauthorized', { status: 401 });
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+    this.state.acceptWebSocket(server);
+    (server as WebSocket & { serializeAttachment(value: unknown): void }).serializeAttachment(attachment);
+    return new Response(null, { status: 101, webSocket: client });
   }
 
-  private sendSafe(ws: { send: (data: string) => void }, payload: Record<string, unknown>): void {
-    try { ws.send(JSON.stringify(payload)); } catch { /* socket closed */ }
+  async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string) {
+    const attachment = (ws as WebSocket & { deserializeAttachment(): SocketAttachment }).deserializeAttachment();
+    let event: { type?: string; voicePrompt?: string; digit?: string; digits?: string; callSid?: string; customParameters?: Record<string, string> };
+    try { event = JSON.parse(typeof message === 'string' ? message : new TextDecoder().decode(message)); } catch { return; }
+    if (event.type === 'setup') {
+      const suppliedCallSid = event.callSid || event.customParameters?.callSid;
+      const suppliedTo = event.customParameters?.toNumber;
+      if ((suppliedCallSid && suppliedCallSid !== attachment.callSid) || (suppliedTo && suppliedTo !== attachment.toNumber)) ws.close(1008, 'Call identity mismatch');
+      else {
+        const session = new ReceptionistSession({ ...attachment, expectedSnapshotHash: attachment.snapshotHash, mode: 'receptionist', fromNumber: event.customParameters?.fromNumber || null });
+        await session.loadContext();
+        await this.state.storage.put('session', session.exportState());
+      }
+      return;
+    }
+    const stored = await this.state.storage.get<StoredState>('session');
+    const session = new ReceptionistSession({
+      ...attachment, expectedSnapshotHash: attachment.snapshotHash, mode: 'receptionist',
+      fromNumber: stored?.fromNumber || event.customParameters?.fromNumber || null,
+      history: stored?.history, transcript: stored?.transcript, messageTaken: stored?.messageTaken, turnIndex: stored?.turnIndex,
+    });
+    await session.loadContext();
+    if (event.type === 'dtmf' && String(event.digit || event.digits || '') === '0') {
+      if (session.snapshot?.capabilities.warmTransfer) {
+        this.send(ws, { type: 'text', token: 'Let me connect you with someone who can help.', last: true });
+        this.send(ws, { type: 'end', handoffData: JSON.stringify({ reasonCode: 'live-agent-handoff', reason: 'Caller pressed 0' }) });
+      } else this.send(ws, { type: 'text', token: 'I cannot connect the call right now. I can arrange a callback instead.', last: true });
+      return;
+    }
+    if (event.type !== 'prompt') return;
+    const userText = String(event.voicePrompt || '').slice(0, 1000);
+    if (!userText.trim()) return;
+    const result = await session.handleUserText(userText).catch(() => null);
+    await this.state.storage.put('session', session.exportState());
+    const reply = result?.reply || 'I am having trouble with that. Please try again shortly.';
+    this.send(ws, { type: 'text', token: reply, last: true });
+    if (result?.handoffRequested) this.send(ws, { type: 'end', handoffData: JSON.stringify({ reasonCode: 'live-agent-handoff', reason: result.handoffReason || 'Human requested' }) });
+  }
+
+  async webSocketClose(ws: WebSocket) {
+    const attachment = (ws as WebSocket & { deserializeAttachment(): SocketAttachment }).deserializeAttachment();
+    const stored = await this.state.storage.get<StoredState>('session');
+    const session = new ReceptionistSession({ ...attachment, expectedSnapshotHash: attachment.snapshotHash, mode: 'receptionist', ...stored });
+    await session.finalize().catch(() => null);
+    ws.close(1000, 'Call complete');
+  }
+
+  private send(ws: WebSocket, payload: Record<string, unknown>) {
+    try { ws.send(JSON.stringify(payload)); } catch { /* already closed */ }
   }
 }

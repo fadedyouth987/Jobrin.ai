@@ -201,9 +201,57 @@ async function main() {
   const activate = await api('POST', `/api/intelligence/automations/${autoId}/status`, { status: 'active' }, token, w);
   log('activate automation', activate.status === 200 ? 'PASS' : 'FAIL');
 
-  // 28. Team invites (needs service-role which IS configured)
-  const invite = await api('POST', '/api/team/invites', { email: `member-${Date.now()}@example.com`, role: 'manager' }, token, w);
-  log('team invite', invite.status === 201 ? 'PASS' : invite.status === 409 ? 'EXPECTED' : 'FAIL', `${invite.status} ${invite.payload?.error || ''}`);
+  // 28. Team invite: no Supabase email is sent. Exercise the explicit setup
+  // handoff end to end, including link verification, password choice and the
+  // invited -> active membership transition.
+  const memberEmail = `member-${Date.now()}@gmail.com`;
+  const memberPassword = '***';
+  const invite = await api('POST', '/api/team/invites', { email: memberEmail, role: 'manager' }, token, w);
+  const setupUrl = invite.payload?.setupUrl || '';
+  const inviteCreated = invite.status === 201
+    && invite.payload?.delivery === 'manual'
+    && invite.payload?.member?.status === 'invited'
+    && setupUrl.startsWith(`${supaUrl}/auth/v1/verify`);
+  log('team setup link created without email', inviteCreated ? 'PASS' : 'FAIL', `${invite.status} ${invite.payload?.error || ''}`);
+
+  if (inviteCreated) {
+    const setup = new URL(setupUrl);
+    const tokenHash = setup.searchParams.get('token') || '';
+    const verificationType = setup.searchParams.get('type') || '';
+    const verifyRes = await fetch(supaUrl + '/auth/v1/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: supaKey },
+      body: JSON.stringify({ token_hash: tokenHash, type: verificationType }),
+    });
+    const verified = await verifyRes.json().catch(() => ({}));
+    const memberToken = verified.access_token || '';
+    log('team setup link verifies', verifyRes.status === 200 && Boolean(memberToken) ? 'PASS' : 'FAIL', `status=${verifyRes.status}`);
+
+    const passwordRes = await fetch(supaUrl + '/auth/v1/user', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', apikey: supaKey, Authorization: `Bearer ${memberToken}` },
+      body: JSON.stringify({ password: memberPassword }),
+    });
+    log('invited member sets password', passwordRes.status === 200 ? 'PASS' : 'FAIL', `status=${passwordRes.status}`);
+
+    const accepted = await api('POST', '/api/team/invites/accept', {}, memberToken);
+    const activated = accepted.status === 200
+      && accepted.payload?.accepted === true
+      && accepted.payload?.members?.some((member) => member.workspace_id === w && member.status === 'active');
+    log('invited member activates membership', activated ? 'PASS' : 'FAIL', `status=${accepted.status}`);
+
+    const memberSignIn = await fetch(supaUrl + '/auth/v1/token?grant_type=password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: supaKey },
+      body: JSON.stringify({ email: memberEmail, password: memberPassword }),
+    });
+    const memberSession = await memberSignIn.json().catch(() => ({}));
+    const memberWorkspaces = await api('GET', '/api/workspaces', undefined, memberSession.access_token);
+    const usable = memberSignIn.status === 200
+      && memberWorkspaces.status === 200
+      && memberWorkspaces.payload?.workspaces?.some((workspace) => workspace.id === w && workspace.role === 'manager');
+    log('invited member can sign in and use workspace', usable ? 'PASS' : 'FAIL', `login=${memberSignIn.status} workspaces=${memberWorkspaces.status}`);
+  }
 
   // 29. Assets
   const assetCreate = await api('POST', '/api/assets', { customer_id: custId, name: 'Kitchen hot water system', asset_type: 'Hot water system', make: 'Rheem', model: 'Stellar 360' }, token, w);

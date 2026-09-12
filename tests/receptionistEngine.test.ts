@@ -3,17 +3,19 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { buildSystemPrompt, issueCallToken, verifyCallToken, ReceptionistSession, type CallContext } from '../server/ai/receptionistCall';
+import { buildApprovedContextSnapshot, buildSystemPrompt, issueCallToken, signApprovedContextSnapshot, verifyApprovedContextSnapshot, verifyCallToken, ReceptionistSession, type CallContext } from '../server/ai/receptionistCall';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const source = (relative: string) => readFileSync(join(here, '..', relative), 'utf8');
 
 test('call tokens are signed, bound to one call, and reject tampering', () => {
-  const token = issueCallToken('11111111-1111-1111-1111-111111111111', 'CA123');
+  const token = issueCallToken('11111111-1111-1111-1111-111111111111', 'CA123', '+61800000000', 'snapshot-hash');
   const verified = verifyCallToken(token);
   assert.ok(verified);
   assert.equal(verified.workspaceId, '11111111-1111-1111-1111-111111111111');
   assert.equal(verified.callSid, 'CA123');
+  assert.equal(verified.toNumber, '+61800000000');
+  assert.equal(verified.snapshotHash, 'snapshot-hash');
   // Tampered signature or payload must be rejected outright.
   assert.equal(verifyCallToken(token.slice(0, -2) + 'xx'), null);
   assert.equal(verifyCallToken('v1.not-json.zz'), null);
@@ -28,6 +30,7 @@ const context: CallContext = {
     after_hours_message: 'The team is unavailable right now.', transfer_number: '+61400000000',
     language: 'en-AU', allow_booking: true, allow_warm_transfer: true, allow_message_take: true,
     allow_followup_sms: false,
+    approved_pricing_language: 'Quotes are free and confirmed by the team.', custom_escalation_rules: ['Escalate gas smells.'], callback_window: 'one business day', after_hours_rule: 'Take a callback request.',
   },
   business: { trading_name: 'Fix It Plumbing', suburb: 'Salisbury', state: 'SA', phone: '0400000000' },
   knowledge: [{ title: 'Opening hours', content: 'Open 7am to 5pm Monday to Friday.' }],
@@ -37,28 +40,37 @@ const context: CallContext = {
 test('the system prompt always carries the safety guardrails and only approved facts', () => {
   const prompt = buildSystemPrompt(context);
   assert.match(prompt, /virtual receptionist/);
-  assert.match(prompt, /Never invent prices/);
-  assert.match(prompt, /Never take card details/);
+  assert.match(prompt, /Never fabricate business facts, prices/);
+  assert.match(prompt, /Never ask for or accept card numbers/);
   assert.match(prompt, /Opening hours/); // approved knowledge is included
   assert.match(prompt, /Emergency callout/); // services are listed
-  assert.match(prompt, /Never quote a binding price/); // owner instructions included
+  assert.match(prompt, /Quotes are free and confirmed by the team/);
+  assert.doesNotMatch(prompt, /appointment\.book|availability\.check|message\.send_template/);
 });
 
-test('without an AI key the session fails safe to a message-take flow', async () => {
+test('signed snapshots reject modified workspace facts', () => {
+  const snapshot = buildApprovedContextSnapshot(context);
+  const signed = signApprovedContextSnapshot(snapshot);
+  assert.equal(verifyApprovedContextSnapshot(snapshot, signed.hash, signed.signature), true);
+  assert.equal(verifyApprovedContextSnapshot({ ...snapshot, businessName: 'Attacker Business' }, signed.hash, signed.signature), false);
+});
+
+test('without an AI key the session fails closed without claiming a save', async () => {
   const { env } = await import('../server/env');
   const originalKey = env.OPENAI_API_KEY;
   env.OPENAI_API_KEY = ''; // simulate the key being absent
   try {
     const session = new ReceptionistSession({ workspaceId: context.workspaceId, callSid: 'CA-test' });
     session.context = context;
+    session.snapshot = buildApprovedContextSnapshot(context);
     session.systemPrompt = buildSystemPrompt(context);
     const first = await session.handleUserText('Do you fix burst pipes in Adelaide?');
     assert.equal(first.configured, false);
-    assert.match(first.reply, /take a message/i);
+    assert.match(first.reply, /trouble accessing/i);
     assert.equal(first.messageTaken, false);
     const second = await session.handleUserText('Yes please, call me on 0412 345 678 about the leak');
-    assert.equal(second.messageTaken, true);
-    assert.match(second.reply, /passed that to the team|passed your message/i);
+    assert.equal(second.messageTaken, false);
+    assert.doesNotMatch(second.reply, /saved|passed.*team/i);
   } finally {
     env.OPENAI_API_KEY = originalKey;
   }

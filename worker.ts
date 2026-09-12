@@ -1,9 +1,10 @@
 import { httpServerHandler } from 'cloudflare:node';
+import twilio from 'twilio';
 import { app, finalizeApp } from './server';
 import { env } from './server/env';
 import { processBusinessBrainQueue } from './server/ai/businessBrainWorker';
 import { processAutomationRuns } from './server/automation/runner';
-import { markReceptionistEngineAttached, ReceptionistSession, verifyCallToken } from './server/ai/receptionistCall';
+import { markReceptionistEngineAttached, verifyCallToken } from './server/ai/receptionistCall';
 import { ReceptionistCallDO } from './server/ai/receptionistDO';
 
 export { ReceptionistCallDO };
@@ -18,21 +19,21 @@ const httpHandler = httpServerHandler({ port });
 
 markReceptionistEngineAttached();
 
-function safeSend(ws: { send: (data: string) => void }, payload: Record<string, unknown>) {
-  try { ws.send(JSON.stringify(payload)); } catch { /* socket already closed */ }
-}
-
 // Workers runtime adapter for the same signed conversation socket that the
 // Node server exposes. The upgrade is validated (token + expiry) before the
 // per-call session starts; per-call state lives in this isolate for the call
 // duration, with the Durable Object upgrade documented as hardening.
-async function handleConversationUpgrade(request: Request, env: unknown, ctx: ExecutionContext): Promise<Response> {
+async function handleConversationUpgrade(request: Request, runtimeEnv: unknown, _ctx: ExecutionContext): Promise<Response> {
+  const twilioSignature = request.headers.get('x-twilio-signature') || '';
+  const signatureUrl = new URL(request.url);
+  signatureUrl.protocol = signatureUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  if (!env.TWILIO_AUTH_TOKEN || !twilio.validateRequest(env.TWILIO_AUTH_TOKEN, twilioSignature, signatureUrl.toString(), {})) return new Response('Invalid Twilio signature', { status: 401 });
   const token = new URL(request.url).searchParams.get('token') || '';
   const auth = verifyCallToken(token);
   if (!auth) return new Response('Invalid call token', { status: 401 });
   // Forward the upgrade to the per-call Durable Object, deterministically
   // named from the CallSid. The DO owns only this call's state.
-  const doNamespace = (env as { RECEPTIONIST_CALL?: { idFromName: (name: string) => unknown; get: (id: unknown) => { fetch: (req: Request) => Promise<Response> } } }).RECEPTIONIST_CALL;
+  const doNamespace = (runtimeEnv as { RECEPTIONIST_CALL?: { idFromName: (name: string) => unknown; get: (id: unknown) => { fetch: (req: Request) => Promise<Response> } } }).RECEPTIONIST_CALL;
   if (!doNamespace) return new Response('DO not available', { status: 500 });
   const doId = doNamespace.idFromName(`receptionist-call:${auth.callSid}`);
   const stub = doNamespace.get(doId);
@@ -40,8 +41,10 @@ async function handleConversationUpgrade(request: Request, env: unknown, ctx: Ex
   doUrl.pathname = '/ws';
   doUrl.searchParams.set('w', auth.workspaceId);
   doUrl.searchParams.set('c', auth.callSid);
+  doUrl.searchParams.set('t', auth.toNumber);
+  doUrl.searchParams.set('h', auth.snapshotHash);
   const doRequest = new Request(doUrl.toString(), request);
-  return stub.fetch(doUrl.toString(), { headers: request.headers });
+  return stub.fetch(doRequest);
 }
 
 export default {

@@ -41,6 +41,7 @@ Apply migrations in order:
 17. `supabase/migrations/0017_trade_hiring_pipeline.sql`
 18. `supabase/migrations/0018_communications_hub.sql`
 19. `supabase/migrations/0019_deployment_hardening.sql`
+20. Apply the remaining numbered migrations in order through `supabase/migrations/0024_receptionist_phase1_runtime.sql`.
 
 Use the browser publishable/anon key only in `VITE_*` variables. The service-role key belongs on the server only.
 
@@ -61,7 +62,7 @@ In Supabase Authentication:
 - enable email/password
 - require email verification in production
 - configure the production Site URL
-- allow `https://jobrin.ai/auth/callback` and `https://jobrin.ai/reset-password`
+- allow `https://jobrin.ai/auth/callback`, `https://jobrin.ai/reset-password`, and `https://jobrin.ai/accept-invite`
 - enable Google and GitHub as the first OAuth providers
 - optionally enable Azure/Microsoft and Apple
 - configure provider client IDs/secrets in Supabase, never in the browser
@@ -126,6 +127,7 @@ VITE_SUPABASE_ANON_KEY=...
 SUPABASE_URL=...
 SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
+RECEPTIONIST_SIGNING_SECRET=...
 
 STRIPE_SECRET_KEY=...
 STRIPE_WEBHOOK_SECRET=...

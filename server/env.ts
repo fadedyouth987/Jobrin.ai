@@ -23,6 +23,7 @@ const raw = {
   GEMINI_MODEL: process.env.GEMINI_MODEL ?? 'gemini-3.7-flash',
   OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
   OPENAI_MODEL: process.env.OPENAI_MODEL ?? 'gpt-5-mini',
+  RECEPTIONIST_SIGNING_SECRET: process.env.RECEPTIONIST_SIGNING_SECRET ?? '',
   TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID ?? '',
   TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN ?? '',
   TWILIO_PHONE_NUMBER: process.env.TWILIO_PHONE_NUMBER ?? '',
@@ -51,6 +52,7 @@ const schema = z.object({
   GEMINI_MODEL: z.string().min(3).max(100),
   OPENAI_API_KEY: z.string(),
   OPENAI_MODEL: z.string().min(3).max(100),
+  RECEPTIONIST_SIGNING_SECRET: z.string(),
   TWILIO_ACCOUNT_SID: z.string(),
   TWILIO_AUTH_TOKEN: z.string(),
   TWILIO_PHONE_NUMBER: z.string(),
@@ -84,6 +86,7 @@ export function assertProductionSecrets() {
     ['STRIPE_PRICE_STARTER', env.STRIPE_PRICE_STARTER],
     ['STRIPE_PRICE_GROWTH', env.STRIPE_PRICE_GROWTH],
     ['STRIPE_PRICE_OPERATOR', env.STRIPE_PRICE_OPERATOR],
+    ['RECEPTIONIST_SIGNING_SECRET', env.RECEPTIONIST_SIGNING_SECRET],
   ];
   const missing = required.filter(([, value]) => !value || /REPLACE|YOUR_|missing/i.test(value)).map(([name]) => name);
   if (missing.length) throw new Error(`Missing production secrets: ${missing.join(', ')}`);
@@ -93,6 +96,7 @@ export function assertProductionSecrets() {
   if (!env.SUPABASE_URL.startsWith('https://')) throw new Error('SUPABASE_URL must use HTTPS in production');
   if (!/^(rk|sk)_(test|live)_/.test(env.STRIPE_SECRET_KEY)) throw new Error('STRIPE_SECRET_KEY must be a restricted or secret Stripe key');
   if (!env.STRIPE_WEBHOOK_SECRET.startsWith('whsec_')) throw new Error('STRIPE_WEBHOOK_SECRET has an invalid format');
+  if (env.RECEPTIONIST_SIGNING_SECRET.length < 32) throw new Error('RECEPTIONIST_SIGNING_SECRET must be at least 32 characters');
   for (const price of [env.STRIPE_PRICE_STARTER, env.STRIPE_PRICE_GROWTH, env.STRIPE_PRICE_OPERATOR]) {
     if (!price.startsWith('price_')) throw new Error('Stripe Price IDs must start with price_');
   }
