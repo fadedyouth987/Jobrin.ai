@@ -3,9 +3,10 @@ import { app, finalizeApp } from './server';
 import { env } from './server/env';
 import { processBusinessBrainQueue } from './server/ai/businessBrainWorker';
 import { processAutomationRuns } from './server/automation/runner';
-import { markReceptionistEngineAttached, ReceptionistSession, verifyCallToken } from './server/ai/receptionistCall';
+import { markReceptionistEngineAttached, verifyCallToken } from './server/ai/receptionistCall';
 import { ReceptionistCallDO } from './server/ai/receptionistDO';
 import { openaiConfigured } from './server/providers/openai';
+import { validateTwilioWebSocket } from './server/providers/twilio';
 
 export { ReceptionistCallDO };
 
@@ -19,15 +20,13 @@ const httpHandler = httpServerHandler({ port });
 
 markReceptionistEngineAttached();
 
-function safeSend(ws: { send: (data: string) => void }, payload: Record<string, unknown>) {
-  try { ws.send(JSON.stringify(payload)); } catch { /* socket already closed */ }
-}
-
-// Workers runtime adapter for the same signed conversation socket that the
-// Node server exposes. The upgrade is validated (token + expiry) before the
-// per-call session starts; per-call state lives in this isolate for the call
-// duration, with the Durable Object upgrade documented as hardening.
+// Workers runtime adapter for the signed ConversationRelay socket. Both
+// Twilio's wss handshake signature and Jobrin's scoped call capability must
+// validate before traffic reaches the Durable Object.
 async function handleConversationUpgrade(request: Request, env: unknown, ctx: ExecutionContext): Promise<Response> {
+  if (request.method !== 'GET') return new Response('WebSocket GET required', { status: 405 });
+  const signature = request.headers.get('x-twilio-signature') || '';
+  if (!signature || !validateTwilioWebSocket(signature, request.url)) return new Response('Invalid Twilio signature', { status: 403 });
   const token = new URL(request.url).searchParams.get('token') || '';
   const auth = verifyCallToken(token);
   if (!auth) return new Response('Invalid call token', { status: 401 });
@@ -42,7 +41,7 @@ async function handleConversationUpgrade(request: Request, env: unknown, ctx: Ex
   doUrl.searchParams.set('w', auth.workspaceId);
   doUrl.searchParams.set('c', auth.callSid);
   const doRequest = new Request(doUrl.toString(), request);
-  return stub.fetch(doUrl.toString(), { headers: request.headers });
+  return stub.fetch(doRequest);
 }
 
 export default {

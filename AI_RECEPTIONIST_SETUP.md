@@ -6,7 +6,9 @@ Read [AI_RECEPTIONIST_ARCHITECTURE.md](./AI_RECEPTIONIST_ARCHITECTURE.md) before
 
 - Tenant-isolated receptionist profiles with Row Level Security.
 - Custom receptionist name, greeting, tone, instructions, provider, voice and language.
-- Warm-transfer, message-taking, booking, follow-up SMS and recording-consent controls.
+- Warm transfer and idempotent callback/message capture.
+- Signed ConversationRelay WebSocket gateway, scoped call tokens and one hibernating SQLite-backed Durable Object per call.
+- AI-processing disclosure at the start of every live call; no transcript retention or recording in Phase 0.
 - Signed Twilio inbound voice and completion webhooks.
 - Call records associated with one workspace and provider call ID.
 - Safe fallback speech whenever live AI is unavailable.
@@ -21,17 +23,17 @@ Read [AI_RECEPTIONIST_ARCHITECTURE.md](./AI_RECEPTIONIST_ARCHITECTURE.md) before
 5. Set `APP_URL=https://jobrin.ai` and `CORS_ORIGINS=https://jobrin.ai,https://www.jobrin.ai`.
 6. Complete Twilio Conversation Relay onboarding and accept its AI/ML addendum.
 7. Set the Twilio number's POST Voice URL to `https://jobrin.ai/api/twilio/voice`.
-8. Implement `/api/receptionist/conversation` with a Cloudflare Durable Object or Agent so each call has isolated WebSocket state. It must validate `X-Twilio-Signature` during the handshake.
-9. Test FAQ, new lead, urgency, booking, transfer, after-hours, interruption, consent refusal and provider failure before unlocking live calls.
+8. Configure the staging Worker secrets and apply the Supabase migrations before testing. The gateway validates `X-Twilio-Signature` against the exact `wss://` URL and validates a short-lived, workspace-bound call token.
+9. Test FAQ, new lead, urgency, transfer, after-hours, interruption, provider failure and a forced mid-call reconnect before unlocking live calls. Booking, follow-up SMS and recording are deliberately unavailable until their dedicated policy, consent and retention flows are complete.
 
 ## Product pattern
 
-The design uses the strongest common ideas from Smith.ai, Goodcall and Dialzara: custom greetings and voices, approved business knowledge, service-aware intake, one question at a time, qualification, booking, warm transfers, message fallback, call summaries and configurable follow-up. Jobrin.ai adds tenant isolation, explicit consent and a test-before-live lock.
+The design uses custom greetings and voices, approved business knowledge, service-aware intake, one question at a time, qualification, warm transfers and message fallback. Jobrin.ai adds tenant isolation, explicit AI-processing disclosure and a test-before-live lock. Controlled booking, SMS follow-up, recording and retained summaries are later rollout phases.
 
 ## Safety rules
 
 - Never collect card details in an AI conversation. Send Stripe-hosted Checkout instead.
-- Do not record without disclosure and affirmative consent.
+- Every call starts with an AI-processing disclosure. Do not record or retain transcripts during Phase 0.
 - Never invent prices, availability, policies or completed actions.
 - Do not make marketing calls or messages without recorded consent and suppression checks.
 - Escalate emergencies, threats, safety-critical cases and requests for a person.

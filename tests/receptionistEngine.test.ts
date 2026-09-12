@@ -8,12 +8,13 @@ import { ADMIN_MODES, JOBRIN_ADMIN_SCOPE, buildSystemPrompt, issueCallToken, ver
 const here = dirname(fileURLToPath(import.meta.url));
 const source = (relative: string) => readFileSync(join(here, '..', relative), 'utf8');
 
-test('call tokens are signed, bound to one call, and reject tampering', () => {
-  const token = issueCallToken('11111111-1111-1111-1111-111111111111', 'CA123');
+test('call tokens are signed, bound to one call and receiving number, and reject tampering', () => {
+  const token = issueCallToken('11111111-1111-1111-1111-111111111111', 'CA123', '+61400000000');
   const verified = verifyCallToken(token);
   assert.ok(verified);
   assert.equal(verified.workspaceId, '11111111-1111-1111-1111-111111111111');
   assert.equal(verified.callSid, 'CA123');
+  assert.equal(verified.toNumber, '+61400000000');
   // Tampered signature or payload must be rejected outright.
   assert.equal(verifyCallToken(token.slice(0, -2) + 'xx'), null);
   assert.equal(verifyCallToken('v1.not-json.zz'), null);
@@ -27,7 +28,7 @@ const context: CallContext = {
     tone: 'warm and calm', business_instructions: 'Never quote a binding price.',
     after_hours_message: 'The team is unavailable right now.', transfer_number: '+61400000000',
     language: 'en-AU', allow_booking: true, allow_warm_transfer: true, allow_message_take: true,
-    allow_followup_sms: false,
+    allow_followup_sms: false, recording_enabled: false, recording_consent_prompt: 'This call may be processed by an AI assistant.',
   },
   business: { trading_name: 'Fix It Plumbing', suburb: 'Salisbury', state: 'SA', phone: '0400000000' },
   knowledge: [{ title: 'Opening hours', content: 'Open 7am to 5pm Monday to Friday.' }],
@@ -77,6 +78,10 @@ test('the engine is attached in both runtimes and the voice webhook signs call t
   assert.match(routeSource, /isReceptionistEngineAttached\(\)/);
   assert.match(routeSource, /RECEPTIONIST_NOT_READY/);
   assert.match(routeSource, /twilioSignatureGuard\('\/api\/twilio\/voice'\)/);
+  assert.match(source('worker.ts'), /validateTwilioWebSocket/);
+  assert.match(source('server/ai/receptionistDO.ts'), /webSocketMessage/);
+  assert.match(source('server/ai/receptionistDO.ts'), /serializeAttachment/);
+  assert.match(source('server/ai/receptionistDO.ts'), /call_state/);
 });
 
 test('signed-in AI Admin departments fail closed without asking for caller details', async () => {

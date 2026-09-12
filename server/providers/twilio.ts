@@ -27,6 +27,15 @@ export function validateTwilioWebhook(signature: string, url: string, params: Re
   return twilio.validateRequest(authToken, signature, url, params);
 }
 
+// ConversationRelay signs the initial WebSocket upgrade. Twilio calculates
+// that signature against the public wss:// URL, including its query string.
+export function validateTwilioWebSocket(signature: string, requestUrl: string) {
+  const { authToken } = requireTwilioConfig();
+  const url = new URL(requestUrl);
+  url.protocol = 'wss:';
+  return twilio.validateRequest(authToken, signature, url.toString(), {});
+}
+
 export async function sendSms(input: { to: string; body: string; statusCallback: string }) {
   const config = requireTwilioConfig();
   const client = twilio(config.accountSid, config.authToken, { autoRetry: true, maxRetries: 2 });

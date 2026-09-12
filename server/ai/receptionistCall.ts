@@ -34,14 +34,14 @@ function b64url(input: Buffer | string) {
 // Short-lived signed capability for one call: the voice webhook issues it the
 // moment a call is mapped to a workspace, and the WebSocket endpoint accepts
 // only connections presenting a valid, unexpired token for that call.
-export function issueCallToken(workspaceId: string, callSid: string) {
-  const payload = { w: workspaceId, c: callSid, exp: Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS };
+export function issueCallToken(workspaceId: string, callSid: string, toNumber: string) {
+  const payload = { w: workspaceId, c: callSid, t: toNumber, exp: Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS };
   const body = b64url(JSON.stringify(payload));
   const signature = crypto.createHmac('sha256', tokenKey()).update(body).digest('base64url');
   return `v1.${body}.${signature}`;
 }
 
-export function verifyCallToken(token: string): { workspaceId: string; callSid: string } | null {
+export function verifyCallToken(token: string): { workspaceId: string; callSid: string; toNumber: string } | null {
   try {
     const parts = token.split('.');
     if (parts.length !== 3 || parts[0] !== 'v1') return null;
@@ -50,10 +50,11 @@ export function verifyCallToken(token: string): { workspaceId: string; callSid: 
     const a = Buffer.from(signature);
     const b = Buffer.from(expected);
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as { w?: string; c?: string; exp?: number };
-    if (!payload.w || !payload.c || !payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null;
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as { w?: string; c?: string; t?: string; exp?: number };
+    if (!payload.w || !payload.c || !payload.t || !payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null;
     if (!/^[0-9a-fA-F-]{36}$/.test(payload.w)) return null;
-    return { workspaceId: payload.w, callSid: payload.c };
+    if (!/^\+[1-9]\d{7,14}$/.test(payload.t)) return null;
+    return { workspaceId: payload.w, callSid: payload.c, toNumber: payload.t };
   } catch {
     return null;
   }
@@ -131,6 +132,7 @@ export type TurnResult = {
   configured: boolean;
   messageTaken: boolean;
   note?: string;
+  handoff?: { reason: string };
 };
 
 export type CallContext = {
@@ -139,6 +141,7 @@ export type CallContext = {
     display_name: string; greeting: string; tone: string; business_instructions: string;
     after_hours_message: string; transfer_number: string | null; language: string;
     allow_booking: boolean; allow_warm_transfer: boolean; allow_message_take: boolean; allow_followup_sms: boolean;
+    recording_enabled: boolean; recording_consent_prompt: string;
   };
   business: { trading_name: string | null; suburb: string | null; state: string | null; phone: string | null } | null;
   knowledge: Array<{ title: string; content: string }>;
@@ -148,7 +151,7 @@ export type CallContext = {
 export async function fetchCallContext(workspaceId: string): Promise<CallContext | null> {
   try {
     const [profileResult, businessResult, knowledgeResult, servicesResult] = await Promise.all([
-      supabaseAdmin.from('receptionist_profiles').select('display_name,greeting,tone,business_instructions,after_hours_message,transfer_number,language,allow_booking,allow_warm_transfer,allow_message_take,allow_followup_sms').eq('workspace_id', workspaceId).maybeSingle(),
+      supabaseAdmin.from('receptionist_profiles').select('display_name,greeting,tone,business_instructions,after_hours_message,transfer_number,language,allow_booking,allow_warm_transfer,allow_message_take,allow_followup_sms,recording_enabled,recording_consent_prompt').eq('workspace_id', workspaceId).maybeSingle(),
       supabaseAdmin.from('business_profiles').select('trading_name,suburb,state,phone').eq('workspace_id', workspaceId).maybeSingle(),
       supabaseAdmin.from('knowledge_documents').select('title,content').eq('workspace_id', workspaceId).eq('approved', true).order('updated_at', { ascending: false }).limit(6),
       supabaseAdmin.from('services').select('name,pricing_mode,base_price_cents').eq('workspace_id', workspaceId).order('name').limit(12),
@@ -232,10 +235,22 @@ const TAKE_MESSAGE_TOOL = {
   },
 };
 
+const HANDOFF_TOOL = {
+  type: 'function',
+  function: {
+    name: 'request_handoff',
+    description: 'Transfer the caller to the configured person. Use only when the caller asks for a person or an escalation rule applies.',
+    parameters: {
+      type: 'object', additionalProperties: false, required: ['reason'],
+      properties: { reason: { type: 'string', minLength: 3, maxLength: 300 } },
+    },
+  },
+};
+
 // Only the receptionist hat can take messages (it is on a live call with the
 // caller). Advisory hats draft in chat — their output is the reply itself.
 function toolsForMode(mode: AdminMode): unknown[] {
-  return mode === 'receptionist' ? [TAKE_MESSAGE_TOOL] : [];
+  return mode === 'receptionist' ? [TAKE_MESSAGE_TOOL, HANDOFF_TOOL] : [];
 }
 
 function providerUnavailableReply(mode: AdminMode): string {
@@ -248,7 +263,7 @@ function providerUnavailableReply(mode: AdminMode): string {
 
 // ---------- Persistence (best-effort, fail-closed without secrets) ----------
 
-async function recordMessageTake(context: CallContext, fromNumber: string | null, args: { callback_name?: string; callback_number?: string; reason?: string }): Promise<string> {
+async function recordMessageTake(context: CallContext, fromNumber: string | null, args: { callback_name?: string; callback_number?: string; reason?: string }, idempotencyKey: string): Promise<string> {
   const note = `Receptionist message take — caller ${fromNumber || 'unknown'}: ${args.reason || 'no reason captured'} (callback: ${args.callback_number || fromNumber || 'not provided'})`.slice(0, 1000);
   try {
     let customerId: string | null = null;
@@ -263,8 +278,15 @@ async function recordMessageTake(context: CallContext, fromNumber: string | null
     const lead = await supabaseAdmin.from('leads').insert({
       workspace_id: context.workspaceId, customer_id: customerId,
       title: 'Callback request — AI receptionist',
-      description: note, source: 'receptionist',
+      description: note, source: 'receptionist', source_detail: { receptionist_idempotency_key: idempotencyKey },
     }).select('id').single();
+    if (lead.error) {
+      const existing = await supabaseAdmin.from('leads').select('id')
+        .eq('workspace_id', context.workspaceId).eq('source', 'receptionist')
+        .contains('source_detail', { receptionist_idempotency_key: idempotencyKey }).maybeSingle();
+      if (!existing.data) throw lead.error;
+      return 'Callback task already exists for this call.';
+    }
     await supabaseAdmin.from('ai_actions').insert({
       workspace_id: context.workspaceId, requested_by: 'receptionist', actor_type: 'receptionist_voice',
       tool_name: 'message.take', risk_level: 'low', input: {},
@@ -342,6 +364,21 @@ export class ReceptionistSession {
     return this.context?.profile.greeting || 'Thanks for calling.';
   }
 
+  snapshotForCall() {
+    return {
+      history: this.history.slice(-16),
+      transcript: this.transcript.slice(-60),
+      turnNumber: this.turnNumber,
+      messageTaken: this.messageTaken,
+    };
+  }
+
+  restoreForCall(transcript: string[], turnNumber: number, messageTaken: boolean) {
+    this.transcript.splice(0, this.transcript.length, ...transcript.slice(-60));
+    this.turnNumber = Math.max(0, turnNumber);
+    this.messageTaken = messageTaken;
+  }
+
   private pushTranscript(who: 'caller' | 'receptionist', text: string) {
     this.transcript.push(`${who}: ${text}`.slice(0, 2000));
     if (this.transcript.length > 60) this.transcript.shift();
@@ -384,7 +421,7 @@ export class ReceptionistSession {
       if (this.pendingMessageTake && userText.trim().length >= 6) {
         this.pendingMessageTake = false;
         this.messageTaken = true;
-        const note = await recordMessageTake(this.context ?? { workspaceId: this.workspaceId } as unknown as CallContext, this.fromNumber, { reason: userText.slice(0, 500) });
+        const note = await recordMessageTake(this.context ?? { workspaceId: this.workspaceId } as unknown as CallContext, this.fromNumber, { reason: userText.slice(0, 500) }, `receptionist:${this.callSid}:message:${this.turnNumber}`);
         const reply = `Thank you — I have passed that to the team. They will be in touch.`;
         this.pushTranscript('receptionist', reply);
         return { reply, configured: false, messageTaken: true, note };
@@ -430,10 +467,21 @@ export class ReceptionistSession {
     let assistantMessage = first.message!;
     if (this.mode === 'receptionist' && assistantMessage.tool_calls?.length) {
       const call = assistantMessage.tool_calls[0];
+      if (call.function.name === 'request_handoff') {
+        let args: { reason?: string } = {};
+        try { args = JSON.parse(call.function.arguments || '{}'); } catch { args = {}; }
+        if (this.context?.profile.allow_warm_transfer && this.context.profile.transfer_number) {
+          const reason = String(args.reason || 'Caller requested a person.').slice(0, 300);
+          const reply = 'I will transfer you to the team now.';
+          await this.recordModelTurn('completed', first.usage);
+          this.pushTranscript('receptionist', reply);
+          return { reply, configured: true, messageTaken: false, handoff: { reason } };
+        }
+      }
       if (call.function.name === 'take_message') {
         let args: { callback_name?: string; callback_number?: string; reason?: string } = {};
         try { args = JSON.parse(call.function.arguments || '{}'); } catch { args = {}; }
-        const note = await recordMessageTake(this.context!, this.fromNumber, args);
+        const note = await recordMessageTake(this.context!, this.fromNumber, args, `receptionist:${this.callSid}:message:${this.turnNumber}`);
         this.messageTaken = true;
         messages.push(assistantMessage as never);
         messages.push({ role: 'tool', tool_call_id: call.id, content: `Message recorded for the team. Confirm to the caller in one short sentence.` });
@@ -463,13 +511,13 @@ export class ReceptionistSession {
     return { reply, configured: true, messageTaken: false };
   }
 
-  async finalize(): Promise<string | null> {
+  async finalize(retainSummary = false): Promise<string | null> {
     const summary = this.transcript.slice(-12).join(' | ').slice(0, 2000);
     const finalSummary = this.messageTaken ? `[message taken] ${summary}`.slice(0, 2000) : summary;
     try {
-      const patch: Record<string, unknown> = { summary: finalSummary, updated_at: new Date().toISOString() };
+      const patch: Record<string, unknown> = { summary: retainSummary ? finalSummary : null, updated_at: new Date().toISOString() };
       await supabaseAdmin.from('calls').update(patch).eq('workspace_id', this.workspaceId).eq('provider_call_id', this.callSid);
-      await writeNotification(this.workspaceId, 'receptionist.call_handled', 'AI receptionist handled a call', finalSummary.slice(0, 300));
+      await writeNotification(this.workspaceId, 'receptionist.call_handled', 'AI receptionist handled a call', this.messageTaken ? 'A callback request was captured for the team.' : 'The call ended without a retained transcript.');
     } catch {
       // Without the service-role key the summary stays in memory only.
     }

@@ -68,6 +68,12 @@ router.get('/calls', asyncRoute(async (req: AuthenticatedRequest, res) => {
 }));
 
 router.put('/', requireRole('owner','admin'), requireSensitiveAuth, validateBody(profileSchema), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  // These policy-controlled actions need their own executable policy layer.
+  // Keep the configuration fail-closed rather than letting the UI promise a
+  // capability that a live call cannot safely perform yet.
+  if (req.body.allow_booking || req.body.allow_followup_sms || req.body.recording_enabled) {
+    return res.status(409).json({ error: 'RECEPTIONIST_CAPABILITY_NOT_READY', message: 'Booking, follow-up SMS and recording remain unavailable until their consent, retention and idempotency controls are deployed.' });
+  }
   if (req.body.enabled) {
     // Fail closed: live answering unlocks only when every dependency is real.
     const missing: string[] = [];
@@ -159,10 +165,18 @@ webhookRouter.post('/voice', twilioSignatureGuard('/api/twilio/voice'), asyncRou
     response.say({ language: 'en-AU' }, profile?.after_hours_message || 'Thanks for calling. The team is unavailable right now. Please try again later.');
     return res.type('text/xml').send(response.toString());
   }
+  // Recording is intentionally unavailable in Phase 0. ConversationRelay
+  // cannot safely begin a recording only after spoken consent without a
+  // dedicated recording workflow and retention controls.
+  if (profile.recording_enabled) {
+    response.say({ language: profile.language || 'en-AU' }, 'The virtual receptionist is temporarily unavailable. Please call again later.');
+    return res.type('text/xml').send(response.toString());
+  }
   await supabaseAdmin.from('calls').upsert({ workspace_id: integration.workspace_id, provider: 'twilio', provider_call_id: callSid, direction: 'inbound', from_number: from, to_number: to, status: 'in_progress', answered_by: 'ai_receptionist', started_at: new Date().toISOString(), recording_status: profile.recording_enabled ? 'pending_consent' : 'off' }, { onConflict: 'workspace_id,provider,provider_call_id' });
-  const callToken = issueCallToken(integration.workspace_id, callSid);
+  const callToken = issueCallToken(integration.workspace_id, callSid, to);
   const connect = response.connect({ action: `${env.APP_URL.replace(/\/$/,'')}/api/twilio/voice/complete` });
-  const relay = connect.conversationRelay({ url: `${websocketUrl()}?token=${encodeURIComponent(callToken)}`, welcomeGreeting: profile.greeting, language: profile.language, ttsProvider: profile.voice_provider, voice: profile.voice_id, interruptible: 'any' });
+  const disclosure = `You are speaking with ${profile.display_name || 'Jobrin.ai'}, the business's virtual receptionist. This call may be processed by an AI assistant to help the team follow up.`;
+  const relay = connect.conversationRelay({ url: `${websocketUrl()}?token=${encodeURIComponent(callToken)}`, welcomeGreeting: `${disclosure} ${profile.greeting}`, language: profile.language, ttsProvider: profile.voice_provider, voice: profile.voice_id, interruptible: 'any' });
   relay.parameter({ name: 'workspaceId', value: integration.workspace_id });
   relay.parameter({ name: 'callSid', value: callSid });
   relay.parameter({ name: 'fromNumber', value: from });
@@ -171,8 +185,18 @@ webhookRouter.post('/voice', twilioSignatureGuard('/api/twilio/voice'), asyncRou
 
 webhookRouter.post('/voice/complete', twilioSignatureGuard('/api/twilio/voice/complete'), asyncRoute(async (req, res) => {
   const callSid = String(req.body.CallSid ?? '');
-  if (callSid) await supabaseAdmin.from('calls').update({ status: String(req.body.SessionStatus ?? req.body.CallStatus ?? 'completed'), ended_at: new Date().toISOString(), duration_seconds: Number(req.body.SessionDuration || 0) }).eq('provider','twilio').eq('provider_call_id',callSid);
-  res.type('text/xml').send(new twilio.twiml.VoiceResponse().toString());
+  const response = new twilio.twiml.VoiceResponse();
+  let handoff: { kind?: string; reason?: string } | null = null;
+  try { handoff = JSON.parse(String(req.body.HandoffData || '')) as typeof handoff; } catch { /* no handoff */ }
+  if (callSid) {
+    const { data: call } = await supabaseAdmin.from('calls').select('workspace_id').eq('provider','twilio').eq('provider_call_id',callSid).maybeSingle();
+    const { data: profile } = call ? await supabaseAdmin.from('receptionist_profiles').select('transfer_number,allow_warm_transfer').eq('workspace_id', call.workspace_id).maybeSingle() : { data: null };
+    const transfer = handoff?.kind === 'warm_transfer' && profile?.allow_warm_transfer ? profile.transfer_number : null;
+    const status = transfer ? 'transferring' : String(req.body.SessionStatus ?? req.body.CallStatus ?? 'completed');
+    await supabaseAdmin.from('calls').update({ status, ended_at: transfer ? null : new Date().toISOString(), duration_seconds: Number(req.body.SessionDuration || 0) }).eq('provider','twilio').eq('provider_call_id',callSid);
+    if (transfer) response.dial({ answerOnBridge: true }, transfer);
+  }
+  res.type('text/xml').send(response.toString());
 }));
 
 export { webhookRouter as receptionistWebhookRouter };
