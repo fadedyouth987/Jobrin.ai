@@ -488,7 +488,219 @@ export function ComingSoonPage({ featureKey }: { featureKey: string }) {
 
 export function ModulePage({title,eyebrow,description,status='Backend schema ready'}:{title:string;eyebrow:string;description:string;status?:string}) { return <Page title={title} eyebrow={eyebrow}><Card className="p-7"><div className="flex items-start justify-between gap-4"><div><h3 className="text-xl font-bold">{title}</h3><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{description}</p></div><StatusPill tone="amber">{status}</StatusPill></div><div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">This screen does not fake external actions. It stays visibly limited until the required provider, worker or controlled Operator tool is connected and tested.</div></Card></Page> }
 
-export function SettingsPage() { return <Page title="Settings" eyebrow="Workspace configuration" description="Everything that shapes how Jobrin.ai works for this business. Business identity and services feed quotes, invoices and customer messages; security protects the account; billing controls the plan."><div className="grid gap-4 md:grid-cols-2">{[['Business profile','Update business identity, trading details and service context.','/onboarding'],['Services & pricing','Configure approved services and prices.','/onboarding'],['Security','MFA and security posture.','/app/settings/security'],['Billing','Plan, subscription and Stripe portal.','/app/billing']].map(([title,desc,href])=><AppLink key={title} href={href} className="block"><Card className="h-full p-5 transition hover:border-indigo-300"><h3 className="font-bold">{title}</h3><p className="mt-2 text-sm leading-6 text-slate-500">{desc}</p></Card></AppLink>)}</div></Page> }
+export function SettingsPage() { return <Page title="Settings" eyebrow="Workspace configuration" description="Everything that shapes how Jobrin.ai works for this business. Business identity and services feed quotes, invoices and customer messages; security protects the account; billing controls the plan."><div className="grid gap-4 md:grid-cols-2">{[['Business profile','Update business identity, trading details and service context.','/app/settings/business'],['Services & pricing','Configure approved services, prices, business hours and service areas.','/app/settings/services'],['Security','MFA and security posture.','/app/settings/security'],['Billing','Plan, subscription and Stripe portal.','/app/billing']].map(([title,desc,href])=><AppLink key={title} href={href} className="block"><Card className="h-full p-5 transition hover:border-indigo-300"><h3 className="font-bold">{title}</h3><p className="mt-2 text-sm leading-6 text-slate-500">{desc}</p></Card></AppLink>)}</div></Page> }
+
+const BUSINESS_PROFILE_EMPTY = {
+  trading_name: '', legal_name: '', abn: '', industry: '', phone: '', email: '', website: '',
+  timezone: 'Australia/Adelaide', gst_registered: false, description: '',
+  street_address: '', suburb: '', state: '', postcode: '',
+};
+
+export function BusinessProfileSettingsPage() {
+  const { workspaceId } = useAuth();
+  const [form,setForm] = useState<any>(BUSINESS_PROFILE_EMPTY);
+  const [loading,setLoading] = useState(true); const [error,setError] = useState(''); const [busy,setBusy] = useState(false); const [saved,setSaved] = useState(false); const [dirty,setDirty] = useState(false);
+  const load = async () => { if (!workspaceId) return; setLoading(true); setError(''); try { const result = await apiFetch<any>('/api/workspaces/current', {}, workspaceId); const profile = result.businessProfile || {}; setForm({ ...BUSINESS_PROFILE_EMPTY, ...profile }); setDirty(false); } catch (err: any) { setError(err.message); } finally { setLoading(false); } };
+  useEffect(() => { void load(); }, [workspaceId]);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => { if (dirty) { event.preventDefault(); event.returnValue = ''; } };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+  const set = (key: string) => (event: any) => { const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value; setForm((v: any) => ({ ...v, [key]: value })); setDirty(true); setSaved(false); };
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!workspaceId) return; setBusy(true); setError('');
+    try {
+      const payload = { ...form, abn: form.abn || null, phone: form.phone || null, email: form.email || null, website: form.website || null, street_address: form.street_address || null, suburb: form.suburb || null, postcode: form.postcode || null };
+      await apiFetch('/api/workspaces/business-profile', { method: 'PUT', body: JSON.stringify(payload) }, workspaceId);
+      setDirty(false); setSaved(true);
+    } catch (err: any) { setError(err.message); } finally { setBusy(false); }
+  };
+  if (loading) return <Spinner label="Loading business profile…"/>;
+  return <Page title="Business profile" eyebrow="Workspace configuration" description="Trading details, timezone and address used on quotes, invoices, customer messages and the AI receptionist.">
+    <Card className="p-7">
+      {error && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+      {saved && !dirty && <div className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">Saved.</div>}
+      {dirty && <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">You have unsaved changes.</div>}
+      <form onSubmit={save} className="grid gap-4 sm:grid-cols-2">
+        <Field label="Trading name" value={form.trading_name} onChange={set('trading_name')} required/>
+        <Field label="Legal name" value={form.legal_name} onChange={set('legal_name')}/>
+        <Field label="ABN" value={form.abn||''} onChange={set('abn')}/>
+        <SelectField label="Industry" value={form.industry||'other'} onChange={set('industry')}><option value="plumbing">Plumbing</option><option value="electrical">Electrical</option><option value="hvac">HVAC</option><option value="building">Building</option><option value="cleaning">Cleaning</option><option value="landscaping">Landscaping</option><option value="painting">Painting</option><option value="pest_control">Pest control</option><option value="handyman">Handyman</option><option value="other">Other service</option></SelectField>
+        <Field label="Phone" value={form.phone||''} onChange={set('phone')}/>
+        <Field label="Email" type="email" value={form.email||''} onChange={set('email')}/>
+        <Field label="Website" type="url" value={form.website||''} onChange={set('website')} placeholder="https://"/>
+        <SelectField label="Timezone" value={form.timezone} onChange={set('timezone')}><option>Australia/Adelaide</option><option>Australia/Sydney</option><option>Australia/Brisbane</option><option>Australia/Perth</option><option>Australia/Darwin</option><option>Australia/Hobart</option></SelectField>
+        <Field label="Street address" value={form.street_address||''} onChange={set('street_address')}/>
+        <Field label="Suburb" value={form.suburb||''} onChange={set('suburb')}/>
+        <Field label="State" value={form.state||''} onChange={set('state')}/>
+        <Field label="Postcode" value={form.postcode||''} onChange={set('postcode')}/>
+        <div className="sm:col-span-2"><TextareaField label="Business description" value={form.description} onChange={set('description')}/></div>
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-700 sm:col-span-2"><input type="checkbox" checked={form.gst_registered} onChange={set('gst_registered')}/> GST registered</label>
+        <div className="sm:col-span-2"><PrimaryButton disabled={busy || !dirty}>{busy ? 'Saving…' : 'Save changes'}</PrimaryButton></div>
+      </form>
+    </Card>
+  </Page>;
+}
+
+const WEEKDAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+const emptyHours = () => Array.from({length:7},(_,weekday)=>({weekday,opens_at:'09:00',closes_at:'17:00',closed:weekday>=5}));
+
+export function ServicesSettingsPage() {
+  const { workspaceId } = useAuth();
+  const [services,setServices] = useState<any[]>([]);
+  const [hours,setHours] = useState<any[]>(emptyHours());
+  const [areas,setAreas] = useState<any[]>([]);
+  const [loading,setLoading] = useState(true); const [error,setError] = useState(''); const [busy,setBusy] = useState('');
+  const [editingId,setEditingId] = useState<string|null>(null);
+  const [showArchived,setShowArchived] = useState(false);
+  const [newService,setNewService] = useState({ name:'', description:'', booking_type:'bookable', default_duration_minutes:60, pricing_mode:'quote', base_price_dollars:'' });
+  const [newArea,setNewArea] = useState({ kind:'suburb', value:'', surcharge_dollars:'' });
+  const [addingService,setAddingService] = useState(false);
+  const [addingArea,setAddingArea] = useState(false);
+
+  const load = async () => {
+    if (!workspaceId) return; setLoading(true); setError('');
+    try {
+      const [svc,hrs,ar] = await Promise.all([
+        apiFetch<any>('/api/services', {}, workspaceId),
+        apiFetch<any>('/api/services/hours?scheduleType=business', {}, workspaceId),
+        apiFetch<any>('/api/services/areas', {}, workspaceId),
+      ]);
+      setServices(svc.services||[]);
+      setHours(hrs.hours?.length===7 ? hrs.hours.slice().sort((a:any,b:any)=>a.weekday-b.weekday) : emptyHours());
+      setAreas(ar.areas||[]);
+    } catch (err:any) { setError(err.message); } finally { setLoading(false); }
+  };
+  useEffect(()=>{ void load(); }, [workspaceId]);
+
+  const createService = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!workspaceId) return; setBusy('new-service'); setError('');
+    try {
+      await apiFetch('/api/services', { method:'POST', body: JSON.stringify({ ...newService, base_price_cents: newService.base_price_dollars ? Math.round(Number(newService.base_price_dollars)*100) : null }) }, workspaceId);
+      setNewService({ name:'', description:'', booking_type:'bookable', default_duration_minutes:60, pricing_mode:'quote', base_price_dollars:'' });
+      setAddingService(false);
+      await load();
+    } catch (err:any) { setError(err.message); } finally { setBusy(''); }
+  };
+
+  const saveService = async (id: string, patch: any) => {
+    if (!workspaceId) return; setBusy(`svc-${id}`); setError('');
+    try { await apiFetch(`/api/services/${id}`, { method:'PATCH', body: JSON.stringify(patch) }, workspaceId); setEditingId(null); await load(); }
+    catch (err:any) { setError(err.message); } finally { setBusy(''); }
+  };
+
+  const toggleArchive = async (service: any) => {
+    if (!workspaceId) return; setBusy(`svc-${service.id}`); setError('');
+    try { await apiFetch(`/api/services/${service.id}/${service.active ? 'archive' : 'restore'}`, { method:'POST' }, workspaceId); await load(); }
+    catch (err:any) { setError(err.message); } finally { setBusy(''); }
+  };
+
+  const saveHours = async () => {
+    if (!workspaceId) return; setBusy('hours'); setError('');
+    try {
+      const result = await apiFetch<any>('/api/services/hours', { method:'PUT', body: JSON.stringify({ scheduleType:'business', days: hours.map(({weekday,opens_at,closes_at,closed})=>({weekday,opens_at:closed?null:opens_at,closes_at:closed?null:closes_at,closed})) }) }, workspaceId);
+      setHours(result.hours.slice().sort((a:any,b:any)=>a.weekday-b.weekday));
+    } catch (err:any) { setError(err.message); } finally { setBusy(''); }
+  };
+
+  const createArea = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!workspaceId || !newArea.value.trim()) return; setBusy('new-area'); setError('');
+    try {
+      await apiFetch('/api/services/areas', { method:'POST', body: JSON.stringify({ kind:newArea.kind, value:newArea.value.trim(), surcharge_cents: newArea.surcharge_dollars ? Math.round(Number(newArea.surcharge_dollars)*100) : 0 }) }, workspaceId);
+      setNewArea({ kind:'suburb', value:'', surcharge_dollars:'' });
+      setAddingArea(false);
+      await load();
+    } catch (err:any) { setError(err.message); } finally { setBusy(''); }
+  };
+
+  const archiveArea = async (area: any) => {
+    if (!workspaceId) return; setBusy(`area-${area.id}`); setError('');
+    try { await apiFetch(`/api/services/areas/${area.id}/archive`, { method:'POST' }, workspaceId); await load(); }
+    catch (err:any) { setError(err.message); } finally { setBusy(''); }
+  };
+
+  if (loading) return <Spinner label="Loading services & pricing…"/>;
+  const visibleServices = services.filter((s:any) => showArchived || s.active);
+
+  return <Page title="Services & pricing" eyebrow="Workspace configuration" description="The services the AI receptionist can offer, weekly business hours, and where the business works.">
+    {error && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+    <div className="space-y-6">
+      <Card className="p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-bold">Services</h2><div className="flex items-center gap-3"><label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500"><input type="checkbox" checked={showArchived} onChange={e=>setShowArchived(e.target.checked)}/> Show archived</label><SecondaryButton type="button" onClick={()=>setAddingService(v=>!v)}>{addingService?'Cancel':'Add service'}</SecondaryButton></div></div>
+        {addingService && <form onSubmit={createService} className="mt-4 grid gap-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4 sm:grid-cols-2">
+          <Field label="Service name" required value={newService.name} onChange={e=>setNewService(v=>({...v,name:e.target.value}))}/>
+          <SelectField label="Customer action" value={newService.booking_type} onChange={e=>setNewService(v=>({...v,booking_type:e.target.value}))}><option value="bookable">Can request a booking</option><option value="quote">Quote required first</option><option value="enquiry">Enquiry only</option></SelectField>
+          <Field label="Typical duration (minutes)" type="number" min={5} max={1440} value={newService.default_duration_minutes} onChange={e=>setNewService(v=>({...v,default_duration_minutes:Number(e.target.value)}))}/>
+          <SelectField label="Pricing" value={newService.pricing_mode} onChange={e=>setNewService(v=>({...v,pricing_mode:e.target.value}))}><option value="quote">Quote required—no price shown</option><option value="fixed">Fixed price</option><option value="starting_from">Starting from</option><option value="hourly">Hourly</option><option value="callout_hourly">Callout + hourly</option><option value="range">Price range</option></SelectField>
+          <Field label="Base price (AUD)" type="number" min={0} step="0.01" disabled={newService.pricing_mode==='quote'} value={newService.base_price_dollars} onChange={e=>setNewService(v=>({...v,base_price_dollars:e.target.value}))}/>
+          <div className="sm:col-span-2"><TextareaField label="What is included?" value={newService.description} onChange={e=>setNewService(v=>({...v,description:e.target.value}))}/></div>
+          <div className="sm:col-span-2"><PrimaryButton disabled={busy==='new-service'}>{busy==='new-service'?'Adding…':'Add service'}</PrimaryButton></div>
+        </form>}
+        <div className="mt-4 space-y-2">
+          {visibleServices.map((service:any) => <ServiceRow key={service.id} service={service} editing={editingId===service.id} busy={busy===`svc-${service.id}`} onEdit={()=>setEditingId(editingId===service.id?null:service.id)} onSave={(patch)=>saveService(service.id,patch)} onToggleArchive={()=>toggleArchive(service)}/>)}
+          {!visibleServices.length && <p className="py-4 text-sm text-slate-400">No services yet.</p>}
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="font-bold">Business hours</h2>
+        <p className="mt-1 text-xs text-slate-500">Used for booking availability, schedule display and customer messages, in the workspace timezone.</p>
+        <div className="mt-4 space-y-2">
+          {hours.map((day:any,index:number) => <div key={day.weekday} className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-100 p-3">
+            <span className="w-24 flex-none text-sm font-semibold">{WEEKDAYS[day.weekday]}</span>
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500"><input type="checkbox" checked={day.closed} onChange={e=>setHours(v=>v.map((d,i)=>i===index?{...d,closed:e.target.checked}:d))}/> Closed</label>
+            {!day.closed && <>
+              <input type="time" value={day.opens_at||'09:00'} onChange={e=>setHours(v=>v.map((d,i)=>i===index?{...d,opens_at:e.target.value}:d))} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"/>
+              <span className="text-xs text-slate-400">to</span>
+              <input type="time" value={day.closes_at||'17:00'} onChange={e=>setHours(v=>v.map((d,i)=>i===index?{...d,closes_at:e.target.value}:d))} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"/>
+            </>}
+          </div>)}
+        </div>
+        <PrimaryButton className="mt-4" disabled={busy==='hours'} onClick={saveHours}>{busy==='hours'?'Saving…':'Save business hours'}</PrimaryButton>
+      </Card>
+
+      <Card className="p-5">
+        <div className="flex items-center justify-between"><h2 className="font-bold">Service areas</h2><SecondaryButton type="button" onClick={()=>setAddingArea(v=>!v)}>{addingArea?'Cancel':'Add area'}</SecondaryButton></div>
+        {addingArea && <form onSubmit={createArea} className="mt-4 grid gap-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4 sm:grid-cols-3">
+          <SelectField label="Kind" value={newArea.kind} onChange={e=>setNewArea(v=>({...v,kind:e.target.value}))}><option value="suburb">Suburb</option><option value="postcode">Postcode</option><option value="radius">Radius (km)</option><option value="exclude">Excluded</option></SelectField>
+          <Field label="Value" required value={newArea.value} onChange={e=>setNewArea(v=>({...v,value:e.target.value}))} placeholder="e.g. Adelaide, 5000, 25"/>
+          <Field label="Surcharge (AUD)" type="number" min={0} step="0.01" value={newArea.surcharge_dollars} onChange={e=>setNewArea(v=>({...v,surcharge_dollars:e.target.value}))}/>
+          <div className="sm:col-span-3"><PrimaryButton disabled={busy==='new-area'}>{busy==='new-area'?'Adding…':'Add area'}</PrimaryButton></div>
+        </form>}
+        <div className="mt-4 space-y-2">
+          {areas.filter((a:any)=>a.active).map((area:any) => <div key={area.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 p-3 text-sm"><span><span className="font-semibold capitalize">{area.kind}</span>: {area.value}{area.surcharge_cents>0 && <span className="ml-2 text-xs text-slate-500">+<Money cents={area.surcharge_cents}/> surcharge</span>}</span><button type="button" disabled={busy===`area-${area.id}`} onClick={()=>archiveArea(area)} className="text-xs font-semibold text-slate-400 hover:text-red-600">{busy===`area-${area.id}`?'Removing…':'Remove'}</button></div>)}
+          {!areas.filter((a:any)=>a.active).length && <p className="py-4 text-sm text-slate-400">No service areas configured — the business is treated as available everywhere.</p>}
+        </div>
+      </Card>
+    </div>
+  </Page>;
+}
+
+function ServiceRow({ service, editing, busy, onEdit, onSave, onToggleArchive }: { service:any; editing:boolean; busy:boolean; onEdit:()=>void; onSave:(patch:any)=>void; onToggleArchive:()=>void }) {
+  const [draft,setDraft] = useState<any>(null);
+  useEffect(()=>{ if (editing) setDraft({ name:service.name, description:service.description||'', booking_type:service.booking_type, default_duration_minutes:service.default_duration_minutes, pricing_mode:service.pricing_mode, base_price_dollars: service.base_price_cents!=null ? String(service.base_price_cents/100) : '' }); }, [editing, service]);
+  if (editing && draft) {
+    return <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Service name" required value={draft.name} onChange={(e:any)=>setDraft((v:any)=>({...v,name:e.target.value}))}/>
+        <SelectField label="Customer action" value={draft.booking_type} onChange={(e:any)=>setDraft((v:any)=>({...v,booking_type:e.target.value}))}><option value="bookable">Can request a booking</option><option value="quote">Quote required first</option><option value="enquiry">Enquiry only</option></SelectField>
+        <Field label="Typical duration (minutes)" type="number" min={5} max={1440} value={draft.default_duration_minutes} onChange={(e:any)=>setDraft((v:any)=>({...v,default_duration_minutes:Number(e.target.value)}))}/>
+        <SelectField label="Pricing" value={draft.pricing_mode} onChange={(e:any)=>setDraft((v:any)=>({...v,pricing_mode:e.target.value}))}><option value="quote">Quote required—no price shown</option><option value="fixed">Fixed price</option><option value="starting_from">Starting from</option><option value="hourly">Hourly</option><option value="callout_hourly">Callout + hourly</option><option value="range">Price range</option></SelectField>
+        <Field label="Base price (AUD)" type="number" min={0} step="0.01" disabled={draft.pricing_mode==='quote'} value={draft.base_price_dollars} onChange={(e:any)=>setDraft((v:any)=>({...v,base_price_dollars:e.target.value}))}/>
+        <div className="sm:col-span-2"><TextareaField label="What is included?" value={draft.description} onChange={(e:any)=>setDraft((v:any)=>({...v,description:e.target.value}))}/></div>
+      </div>
+      <div className="mt-3 flex gap-2">
+        <PrimaryButton type="button" disabled={busy} onClick={()=>onSave({ name:draft.name, description:draft.description, booking_type:draft.booking_type, default_duration_minutes:draft.default_duration_minutes, pricing_mode:draft.pricing_mode, base_price_cents: draft.base_price_dollars ? Math.round(Number(draft.base_price_dollars)*100) : null })}>{busy?'Saving…':'Save changes'}</PrimaryButton>
+        <SecondaryButton type="button" onClick={onEdit}>Cancel</SecondaryButton>
+      </div>
+    </div>;
+  }
+  return <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 p-3">
+    <div className="min-w-0"><div className="flex items-center gap-2"><p className="truncate font-semibold">{service.name}</p>{!service.active && <StatusPill tone="slate">archived</StatusPill>}</div><p className="truncate text-xs text-slate-500">{service.booking_type.replace('_',' ')} · {service.pricing_mode.replace('_',' ')}{service.base_price_cents!=null && <> · <Money cents={service.base_price_cents}/></>}</p></div>
+    <div className="flex flex-none gap-2"><SecondaryButton type="button" onClick={onEdit}>Edit</SecondaryButton><button type="button" disabled={busy} onClick={onToggleArchive} className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-red-600">{busy?'…':service.active?'Archive':'Restore'}</button></div>
+  </div>;
+}
 
 function ErrorBox({message,onRetry}:{message:string;onRetry?:()=>void}) { return <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700"><div className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4"/>Could not load this page</div><p className="mt-2">{message}</p>{onRetry&&<button onClick={onRetry} className="mt-3 text-xs font-bold underline">Try again</button>}</div> }
 function Page({title,eyebrow,description,action,children}:{title:string;eyebrow:string;description?:string;action?:React.ReactNode;children:React.ReactNode}) { return <div><div className="mb-6 flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.18em] text-indigo-600">{eyebrow}</p><h1 className="mt-1 text-3xl font-black tracking-tight">{title}</h1>{description&&<p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">{description}</p>}</div>{action}</div>{children}</div> }

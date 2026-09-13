@@ -7,10 +7,10 @@ import {
   UserRoundPlus, Users, Voicemail, Workflow,
 } from 'lucide-react';
 import {
-  AnalyticsPage, ApprovalsPage, AutomationsPage, BillingPage, CapabilityMapPage, CommandCentrePage,
+  AnalyticsPage, ApprovalsPage, AutomationsPage, BillingPage, BusinessProfileSettingsPage, CapabilityMapPage, CommandCentrePage,
   ComingSoonPage, CustomersPage, DashboardPage, InboxPage, KnowledgePage, LeadsPage,
   MarketingPage, ModulePage, NotificationsPage, OperationsListPage, OperatorPage, ReviewsPage,
-  ReceptionistPage, SecuritySettingsPage, SettingsPage, TeamPage,
+  ReceptionistPage, SecuritySettingsPage, ServicesSettingsPage, SettingsPage, TeamPage,
 } from '../pages/AppPages';
 import { AssetsPage } from '../pages/AssetsPage';
 import { BusinessBrainPage } from '../pages/BusinessBrainPage';
@@ -145,6 +145,8 @@ export function routeWorkspacePage(path: string) {
   if (path === '/app/team') return <TeamPage/>;
   if (path === '/app/billing') return <BillingPage/>;
   if (path === '/app/settings/security') return <SecuritySettingsPage/>;
+  if (path === '/app/settings/business') return <BusinessProfileSettingsPage/>;
+  if (path === '/app/settings/services') return <ServicesSettingsPage/>;
   if (path === '/app/settings') return <SettingsPage/>;
   return <ModulePage title="Not found" eyebrow="Jobrin.ai" description="That workspace page does not exist in this build." status="404"/>;
 }
