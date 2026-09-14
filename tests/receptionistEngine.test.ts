@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { ADMIN_MODES, JOBRIN_ADMIN_SCOPE, buildSystemPrompt, issueCallToken, verifyCallToken, ReceptionistSession, type CallContext } from '../server/ai/receptionistCall';
+import { ADMIN_MODES, JOBRIN_ADMIN_SCOPE, buildSystemPrompt, issueCallToken, verifyCallToken, ReceptionistSession, DEFAULT_APPROVED_PRICING_LANGUAGE, DEFAULT_CALLBACK_WINDOW, type CallContext } from '../server/ai/receptionistCall';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const source = (relative: string) => readFileSync(join(here, '..', relative), 'utf8');
@@ -127,6 +127,60 @@ test('every AI Admin department understands Jobrin and keeps consequential work 
   assert.match(buildSystemPrompt(context, 'sales'), /Never promise prices or availability/);
   assert.match(buildSystemPrompt(context, 'marketing'), /Never contact customers directly/);
   assert.match(buildSystemPrompt(context, 'support'), /if the approved knowledge does not cover it, say so/);
+});
+
+test('phase-1 runtime controls fall back to safe defaults when unset', () => {
+  const prompt = buildSystemPrompt(context);
+  assert.match(prompt, new RegExp(DEFAULT_APPROVED_PRICING_LANGUAGE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(prompt, new RegExp(DEFAULT_CALLBACK_WINDOW.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(prompt, /CUSTOM ESCALATION RULES: none configured/);
+});
+
+test('the pricing-language guardrail constrains what the receptionist may say about price', () => {
+  const priced: CallContext = { ...context, profile: { ...context.profile, approved_pricing_language: 'We charge a flat call-out fee, confirmed after inspection.' } };
+  const prompt = buildSystemPrompt(priced);
+  assert.match(prompt, /PRICING LANGUAGE \(mandatory\)/);
+  assert.match(prompt, /We charge a flat call-out fee, confirmed after inspection\./);
+  assert.match(prompt, /Never state a dollar figure/);
+});
+
+test('custom escalation rules are listed for the model to check against', () => {
+  const escalating: CallContext = { ...context, profile: { ...context.profile, custom_escalation_rules: ['If the caller mentions a gas leak, transfer immediately', 'If the caller asks for a refund, take a message'] } };
+  const prompt = buildSystemPrompt(escalating);
+  assert.match(prompt, /CUSTOM ESCALATION RULES:/);
+  assert.match(prompt, /If the caller mentions a gas leak, transfer immediately/);
+  assert.match(prompt, /If the caller asks for a refund, take a message/);
+});
+
+test('the callback window is the only wording used when promising a callback', () => {
+  const custom: CallContext = { ...context, profile: { ...context.profile, callback_window: 'by close of business today' } };
+  const prompt = buildSystemPrompt(custom);
+  assert.match(prompt, /CALLBACK WORDING \(mandatory\).*by close of business today/);
+});
+
+test('a call ends once it hits the configured turn limit', async () => {
+  const session = new ReceptionistSession({ workspaceId: context.workspaceId, callSid: 'CA-turn-limit' });
+  session.context = { ...context, profile: { ...context.profile, max_call_turns: 2, max_call_minutes: 30 } };
+  session.systemPrompt = buildSystemPrompt(session.context);
+  const first = await session.handleUserText('Do you fix burst pipes?');
+  assert.equal(first.endCall, undefined);
+  const second = await session.handleUserText('Great, can someone come today?');
+  assert.equal(second.endCall, undefined);
+  const third = await session.handleUserText('One more question please');
+  assert.equal(third.endCall, true);
+  assert.match(third.reply, /wrap up this call/i);
+  // Once ended, the session must not keep taking prompts.
+  const fourth = await session.handleUserText('Hello?');
+  assert.equal(fourth.endCall, true);
+});
+
+test('a call ends once it hits the configured minute limit', async () => {
+  const session = new ReceptionistSession({ workspaceId: context.workspaceId, callSid: 'CA-minute-limit', startedAtMs: Date.now() - 20 * 60_000 });
+  session.context = { ...context, profile: { ...context.profile, max_call_turns: 40, max_call_minutes: 15 } };
+  session.systemPrompt = buildSystemPrompt(session.context);
+  const result = await session.handleUserText('Are you still there?');
+  assert.equal(result.endCall, true);
+  assert.match(result.reply, /wrap up this call/i);
 });
 
 test('model-assisted AI Admin work is metered idempotently and logged with provider usage', () => {

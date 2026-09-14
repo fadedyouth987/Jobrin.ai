@@ -32,7 +32,14 @@ function runSession(ws: WebSocket, session: ReceptionistSession) {
       if (!userText.trim()) return;
       void session
         .handleUserText(userText)
-        .then((result) => send(ws, { type: 'text', token: result.reply, last: true }))
+        .then((result) => {
+          send(ws, { type: 'text', token: result.reply, last: true });
+          // Hard max_call_minutes / max_call_turns limit reached: wrap up and
+          // let the transport end the call rather than keep taking prompts.
+          if (result.endCall) {
+            setTimeout(() => { if (ws.readyState === WebSocket.OPEN) ws.close(1000, 'Call ended'); }, 250);
+          }
+        })
         .catch(() => send(ws, { type: 'text', token: 'Sorry, could you say that again for me?', last: true }));
       return;
     }

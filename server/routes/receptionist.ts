@@ -13,6 +13,10 @@ import { twilioSignatureGuard } from './communications';
 const router = Router();
 const webhookRouter = Router();
 
+// General, non-committal pricing wording only — a quoted dollar figure here
+// would let the live call engine present it as an approved binding price.
+const NO_PRICE_FIGURE = /[$£€]\s*\d/;
+
 const profileSchema = z.object({
   enabled: z.boolean(), display_name: z.string().trim().min(2).max(80), greeting: z.string().trim().min(10).max(500),
   voice_provider: z.enum(['Google','Amazon','ElevenLabs']), voice_id: z.string().trim().min(2).max(120),
@@ -21,6 +25,14 @@ const profileSchema = z.object({
   transfer_number: z.string().trim().regex(/^\+[1-9]\d{7,14}$/).nullable(), after_hours_message: z.string().trim().min(10).max(500),
   allow_booking: z.boolean(), allow_warm_transfer: z.boolean(), allow_message_take: z.boolean(), allow_followup_sms: z.boolean(),
   recording_enabled: z.boolean(), recording_consent_prompt: z.string().trim().min(10).max(500),
+  approved_pricing_language: z.string().trim().min(10).max(500).refine((v) => !NO_PRICE_FIGURE.test(v), 'Use general wording, not a quoted price.').nullable(),
+  custom_escalation_rules: z.array(z.string().trim().min(2).max(300)).max(20),
+  callback_window: z.string().trim().min(5).max(200).nullable(),
+  after_hours_rule: z.string().trim().min(5).max(500).nullable(),
+  max_concurrent_calls: z.number().int().min(1).max(5),
+  max_calls_per_caller_hour: z.number().int().min(1).max(6),
+  max_call_minutes: z.number().int().min(5).max(30),
+  max_call_turns: z.number().int().min(10).max(80),
 });
 
 function websocketUrl() {

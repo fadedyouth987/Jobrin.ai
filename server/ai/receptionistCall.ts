@@ -133,7 +133,18 @@ export type TurnResult = {
   messageTaken: boolean;
   note?: string;
   handoff?: { reason: string };
+  // Set once a hard max_call_minutes / max_call_turns limit is reached — the
+  // transport (Twilio ConversationRelay adapter or Node WS) must end the call
+  // after delivering this reply.
+  endCall?: boolean;
 };
+
+// Fallbacks used whenever an owner has not yet set a phase-1 runtime control.
+// Never invent wording live on a call — fall back to safe, non-committal defaults.
+export const DEFAULT_APPROVED_PRICING_LANGUAGE = 'A team member will confirm pricing after reviewing the request.';
+export const DEFAULT_CALLBACK_WINDOW = 'within one business day';
+export const DEFAULT_MAX_CALL_MINUTES = 15;
+export const DEFAULT_MAX_CALL_TURNS = 40;
 
 export type CallContext = {
   workspaceId: string;
@@ -142,16 +153,26 @@ export type CallContext = {
     after_hours_message: string; transfer_number: string | null; language: string;
     allow_booking: boolean; allow_warm_transfer: boolean; allow_message_take: boolean; allow_followup_sms: boolean;
     recording_enabled: boolean; recording_consent_prompt: string;
+    approved_pricing_language?: string | null; custom_escalation_rules?: unknown; callback_window?: string | null;
+    after_hours_rule?: string | null; max_concurrent_calls?: number | null; max_calls_per_caller_hour?: number | null;
+    max_call_minutes?: number | null; max_call_turns?: number | null;
   };
   business: { trading_name: string | null; suburb: string | null; state: string | null; phone: string | null } | null;
   knowledge: Array<{ title: string; content: string }>;
   services: Array<{ name: string; pricing_mode: string; base_price_cents: number | null }>;
 };
 
+// custom_escalation_rules is stored as a jsonb array (see migration 0027);
+// tolerate anything else the column might legitimately hold and never throw.
+function escalationRulesList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item)).map((item) => item.trim()).filter(Boolean).slice(0, 20);
+}
+
 export async function fetchCallContext(workspaceId: string): Promise<CallContext | null> {
   try {
     const [profileResult, businessResult, knowledgeResult, servicesResult] = await Promise.all([
-      supabaseAdmin.from('receptionist_profiles').select('display_name,greeting,tone,business_instructions,after_hours_message,transfer_number,language,allow_booking,allow_warm_transfer,allow_message_take,allow_followup_sms,recording_enabled,recording_consent_prompt').eq('workspace_id', workspaceId).maybeSingle(),
+      supabaseAdmin.from('receptionist_profiles').select('display_name,greeting,tone,business_instructions,after_hours_message,transfer_number,language,allow_booking,allow_warm_transfer,allow_message_take,allow_followup_sms,recording_enabled,recording_consent_prompt,approved_pricing_language,custom_escalation_rules,callback_window,after_hours_rule,max_concurrent_calls,max_calls_per_caller_hour,max_call_minutes,max_call_turns').eq('workspace_id', workspaceId).maybeSingle(),
       supabaseAdmin.from('business_profiles').select('trading_name,suburb,state,phone').eq('workspace_id', workspaceId).maybeSingle(),
       supabaseAdmin.from('knowledge_documents').select('title,content').eq('workspace_id', workspaceId).eq('approved', true).order('updated_at', { ascending: false }).limit(6),
       supabaseAdmin.from('services').select('name,pricing_mode,base_price_cents').eq('workspace_id', workspaceId).order('name').limit(12),
@@ -178,6 +199,10 @@ export function buildSystemPrompt(context: CallContext, mode: AdminMode = 'recep
   const knowledge = context.knowledge.length
     ? context.knowledge.map((doc) => `## ${doc.title}\n${doc.content}`).join('\n\n')
     : '(No approved knowledge yet — do not guess. Take a message instead.)';
+  const approvedPricingLanguage = context.profile.approved_pricing_language?.trim() || DEFAULT_APPROVED_PRICING_LANGUAGE;
+  const callbackWindow = context.profile.callback_window?.trim() || DEFAULT_CALLBACK_WINDOW;
+  const escalationRules = escalationRulesList(context.profile.custom_escalation_rules);
+  const afterHoursRule = context.profile.after_hours_rule?.trim();
   return [
     `You are ${context.profile.display_name}, the virtual receptionist and office assistant for ${business?.trading_name || 'this business'}${business?.suburb ? ` in ${business.suburb}` : ''}${business?.state ? `, ${business.state}` : ''}.`,
     `You are NOT a human employee. If anyone asks, clearly say you are the business's virtual receptionist.`,
@@ -202,6 +227,13 @@ export function buildSystemPrompt(context: CallContext, mode: AdminMode = 'recep
     `- Never give emergency, safety, legal or medical advice. For emergencies or urgent situations, tell the caller to hang up and dial emergency services if in danger, and offer to take a message for urgent follow-up.`,
     `- In receptionist mode, if unsure, if the caller asks for a person, or for complaints/refunds/legal/financial matters: apologise, and either transfer to ${context.profile.transfer_number || 'the team'} or take a message. In signed-in admin modes, keep output advisory and escalate consequential decisions.`,
     `- Keep replies under three sentences unless reading back captured details.`,
+    ``,
+    `PRICING LANGUAGE (mandatory): the ONLY thing you may say about price is: "${approvedPricingLanguage}". Never state a dollar figure, discount, quote or total beyond this approved wording and the published services above, even if the caller insists.`,
+    `CALLBACK WORDING (mandatory): whenever you promise the team will call the caller back, use exactly this timeframe: "${callbackWindow}". Never invent a different callback time.`,
+    escalationRules.length
+      ? `CUSTOM ESCALATION RULES: before replying, check the caller's request against every rule below. If any rule applies, apologise and either transfer to ${context.profile.transfer_number || 'the team'} or take a message immediately, per the hard rules above.\n${escalationRules.map((rule) => `- ${rule}`).join('\n')}`
+      : `CUSTOM ESCALATION RULES: none configured — use the hard rules above.`,
+    ...(afterHoursRule ? [`AFTER-HOURS RULE: ${afterHoursRule}`] : []),
     ...modeInstructions(mode),
   ].join('\n');
 }
@@ -337,9 +369,11 @@ export class ReceptionistSession {
   readonly transcript: string[] = [];
   private pendingMessageTake = false;
   private turnNumber = 0;
+  private readonly startedAtMs: number;
+  private callEnded = false;
   messageTaken = false;
 
-  constructor(options: { workspaceId: string; callSid: string; fromNumber?: string | null; history?: Array<{ role: 'user' | 'assistant'; content: string }>; mode?: AdminMode }) {
+  constructor(options: { workspaceId: string; callSid: string; fromNumber?: string | null; history?: Array<{ role: 'user' | 'assistant'; content: string }>; mode?: AdminMode; startedAtMs?: number }) {
     this.workspaceId = options.workspaceId;
     this.callSid = options.callSid;
     this.mode = options.mode ?? 'receptionist';
@@ -347,6 +381,23 @@ export class ReceptionistSession {
     this.context = null;
     this.systemPrompt = null;
     this.history = options.history ?? [];
+    this.startedAtMs = options.startedAtMs ?? Date.now();
+  }
+
+  // Hard call-duration / turn-count limits (server/ai/receptionistCall.ts
+  // owns enforcement so it applies identically over the Node WS and Workers
+  // DO transports). Configured per workspace on receptionist_profiles;
+  // DEFAULT_* fallbacks apply until an owner sets their own values.
+  private limitReached(): { reply: string } | null {
+    if (this.mode !== 'receptionist') return null;
+    const maxTurns = this.context?.profile.max_call_turns ?? DEFAULT_MAX_CALL_TURNS;
+    const maxMinutes = this.context?.profile.max_call_minutes ?? DEFAULT_MAX_CALL_MINUTES;
+    const elapsedMinutes = (Date.now() - this.startedAtMs) / 60_000;
+    if (this.turnNumber > maxTurns || elapsedMinutes > maxMinutes) {
+      const reply = `I need to wrap up this call now. I've noted everything so far, and the team will follow up ${this.context?.profile.callback_window?.trim() || DEFAULT_CALLBACK_WINDOW}. Thanks for calling.`;
+      return { reply };
+    }
+    return null;
   }
 
   async loadContext() {
@@ -407,8 +458,20 @@ export class ReceptionistSession {
   }
 
   async handleUserText(userText: string): Promise<TurnResult> {
+    if (this.callEnded) {
+      const reply = `This call has already wrapped up — the team has your details and will follow up.`;
+      return { reply, configured: false, messageTaken: this.messageTaken, endCall: true };
+    }
     this.turnNumber += 1;
     this.pushTranscript('caller', userText);
+
+    const limit = this.limitReached();
+    if (limit) {
+      this.callEnded = true;
+      await this.recordModelTurn('completed', undefined, 'CALL_LIMIT_REACHED');
+      this.pushTranscript('receptionist', limit.reply);
+      return { reply: limit.reply, configured: openaiConfigured(), messageTaken: this.messageTaken, endCall: true };
+    }
 
     // No AI configured: live calls offer a deterministic message-take. Signed-in
     // admin hats report the unavailable provider and never pretend they acted.
@@ -515,7 +578,8 @@ export class ReceptionistSession {
     const summary = this.transcript.slice(-12).join(' | ').slice(0, 2000);
     const finalSummary = this.messageTaken ? `[message taken] ${summary}`.slice(0, 2000) : summary;
     try {
-      const patch: Record<string, unknown> = { summary: retainSummary ? finalSummary : null, updated_at: new Date().toISOString() };
+      const outcome = this.callEnded ? 'call_limit_reached' : this.messageTaken ? 'message_taken' : 'completed';
+      const patch: Record<string, unknown> = { summary: retainSummary ? finalSummary : null, updated_at: new Date().toISOString(), outcome, turn_count: this.turnNumber };
       await supabaseAdmin.from('calls').update(patch).eq('workspace_id', this.workspaceId).eq('provider_call_id', this.callSid);
       await writeNotification(this.workspaceId, 'receptionist.call_handled', 'AI receptionist handled a call', this.messageTaken ? 'A callback request was captured for the team.' : 'The call ended without a retained transcript.');
     } catch {

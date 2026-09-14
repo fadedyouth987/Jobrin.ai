@@ -62,6 +62,9 @@ export class ReceptionistCallDO {
     this.persistSession(session, attachment);
     this.send(ws, { type: 'text', token: result.reply, last: true });
     if (result.handoff) this.send(ws, { type: 'end-session', handoffData: JSON.stringify({ kind: 'warm_transfer', reason: result.handoff.reason }) });
+    // Hard max_call_minutes / max_call_turns limit reached: end the call
+    // rather than keep accepting prompts.
+    else if (result.endCall) this.send(ws, { type: 'end-session', handoffData: JSON.stringify({ kind: 'call_limit_reached' }) });
   }
 
   async webSocketClose(ws: WebSocket): Promise<void> {
