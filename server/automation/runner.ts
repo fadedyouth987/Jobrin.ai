@@ -1,5 +1,6 @@
 import { supabaseAdmin, writeNotification } from '../supabase';
 import { toolByName, requiresApproval, canExecute } from '../ai/toolRegistry';
+import { generateBookingSlots, type BusinessHourRule } from '../routes/public';
 
 // Automation executor: processes the automation_runs queue that the Business
 // Brain worker alone previously left untouched. Runs are claimed atomically,
@@ -21,6 +22,7 @@ export const AUTOMATION_EXECUTABLE_TOOLS = new Set([
   'quote.draft',
   'review.request',
   'business.report',
+  'availability.check',
 ]);
 
 export function isAutomationExecutable(toolName: string) {
@@ -90,6 +92,33 @@ async function executeAutomaticStep(workspaceId: string, step: { tool: string; i
       if (error) throw new Error('REVIEW_REQUEST_CREATE_FAILED');
       return { output: { reviewRequestId: request.id, status: request.status, note: 'Delivery starts once the messaging provider is configured.' } };
     }
+    case 'availability.check': {
+      const serviceId = step.input.serviceId ? String(step.input.serviceId) : null;
+      const from = new Date(String(step.input.from || ''));
+      const to = new Date(String(step.input.to || ''));
+      if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) throw new Error('AVAILABILITY_CHECK_INPUT_INVALID');
+      let durationMinutes = 60;
+      if (serviceId) {
+        const { data: service } = await supabaseAdmin.from('services').select('default_duration_minutes').eq('workspace_id', workspaceId).eq('id', serviceId).maybeSingle();
+        if (service?.default_duration_minutes) durationMinutes = Number(service.default_duration_minutes);
+      }
+      // Reuses the same slot-generation logic and busy-range sources as public
+      // booking availability (server/routes/public.ts) so an automation's view
+      // of "free" matches what a customer is offered.
+      const [rulesResult, busyAppointments, busyJobs] = await Promise.all([
+        supabaseAdmin.from('business_hours').select('weekday,opens_at,closes_at,closed').eq('workspace_id', workspaceId).in('schedule_type', ['booking', 'business']),
+        supabaseAdmin.from('appointments').select('starts_at,ends_at').eq('workspace_id', workspaceId).in('status', ['hold', 'scheduled', 'confirmed']).gte('starts_at', new Date(Date.now() - 86_400_000).toISOString()),
+        supabaseAdmin.from('jobs').select('scheduled_start,scheduled_end').eq('workspace_id', workspaceId).not('scheduled_start', 'is', null).in('status', ['new', 'scheduled', 'on_the_way', 'in_progress']),
+      ]);
+      const busyRanges = [
+        ...(busyAppointments.data ?? []).map((row: any) => ({ start: row.starts_at, end: row.ends_at })),
+        ...(busyJobs.data ?? []).filter((row: any) => row.scheduled_end).map((row: any) => ({ start: row.scheduled_start, end: row.scheduled_end })),
+      ];
+      const days = Math.max(1, Math.min(30, Math.ceil((to.getTime() - from.getTime()) / 86_400_000)));
+      const slots = generateBookingSlots((rulesResult.data ?? []) as BusinessHourRule[], durationMinutes, from, busyRanges, 'Australia/Adelaide', days)
+        .filter((slot) => new Date(slot.start) <= to);
+      return { output: { slots } };
+    }
     case 'business.report': {
       const [{ data: payments, error: paymentsError }, { data: invoices, error: invoicesError }] = await Promise.all([
         supabaseAdmin.from('payments').select('amount_cents').eq('workspace_id', workspaceId).eq('status', 'succeeded'),
@@ -102,6 +131,120 @@ async function executeAutomaticStep(workspaceId: string, step: { tool: string; i
     }
     default:
       throw new Error('TOOL_NOT_EXECUTABLE');
+  }
+}
+
+// --- Event-driven triggering -------------------------------------------
+// Turns a business event (a job completed, a lead created, ...) into a
+// queued automation_runs row with real inputs, instead of the empty
+// `input: {}` the automation builder saves. Scoped like the manual "Run"
+// route above: no generic rule engine, just a documented, narrow mapping.
+
+// Fields a business event may carry that a step's saved input is allowed to
+// be hydrated with when the step didn't already have that field configured.
+// This is a deliberately small, documented allowlist — not a generic merge
+// of arbitrary event payload keys into step input.
+const EVENT_INPUT_FIELDS = ['jobId', 'customerId', 'leadId', 'appointmentId', 'invoiceId'] as const;
+
+type SimpleCondition = { field: string; operator: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte'; value: unknown };
+
+// The `automations.definition.conditions` column is a free-form
+// `Record<string, unknown>[]` at the schema level (see the zod schema in
+// server/routes/intelligence.ts) — there is no documented generic condition
+// language. We support exactly one shape here: { field, operator, value }.
+// Anything else is logged and skipped rather than guessed at, so an
+// automation with an unsupported condition degrades to "always runs" for
+// that clause instead of silently misbehaving.
+function isSimpleCondition(raw: unknown): raw is SimpleCondition {
+  if (!raw || typeof raw !== 'object') return false;
+  const c = raw as Record<string, unknown>;
+  return typeof c.field === 'string' && typeof c.operator === 'string' &&
+    ['eq', 'neq', 'gt', 'gte', 'lt', 'lte'].includes(c.operator) && 'value' in c;
+}
+
+export function evaluateConditions(conditions: unknown[], payload: Record<string, unknown>): boolean {
+  for (const raw of conditions) {
+    if (!isSimpleCondition(raw)) {
+      console.warn(JSON.stringify({ level: 'warn', component: 'automation_trigger', message: 'Unsupported trigger condition shape skipped', condition: raw }));
+      continue;
+    }
+    const actual = payload[raw.field];
+    switch (raw.operator) {
+      case 'eq': if (actual !== raw.value) return false; break;
+      case 'neq': if (actual === raw.value) return false; break;
+      case 'gt': if (!(Number(actual) > Number(raw.value))) return false; break;
+      case 'gte': if (!(Number(actual) >= Number(raw.value))) return false; break;
+      case 'lt': if (!(Number(actual) < Number(raw.value))) return false; break;
+      case 'lte': if (!(Number(actual) <= Number(raw.value))) return false; break;
+    }
+  }
+  return true;
+}
+
+export function buildStepInput(step: { tool?: string; input?: Record<string, unknown> }, payload: Record<string, unknown>) {
+  const input: Record<string, unknown> = { ...(step.input ?? {}) };
+  for (const field of EVENT_INPUT_FIELDS) {
+    if (input[field] === undefined && payload[field] !== undefined) input[field] = payload[field];
+  }
+  return input;
+}
+
+export type AutomationEventType = 'lead.created' | 'appointment.completed' | 'job.completed' | 'invoice.overdue';
+
+// Looks up active automations in `workspaceId` whose trigger_key matches
+// `eventType`, evaluates each automation's saved conditions against
+// `payload`, and — for the ones that pass — queues an automation_runs row
+// whose step inputs are hydrated from the event payload. Cron/schedule
+// triggers (`trigger_key = 'schedule.cron'`) are intentionally out of scope
+// here; nothing dispatches those.
+//
+// Callers must treat this as best-effort: it never throws, so a dispatch
+// failure never breaks the request that produced the business event.
+export async function queueAutomationRun(
+  workspaceId: string,
+  eventType: AutomationEventType,
+  payload: Record<string, unknown>,
+): Promise<{ queued: number }> {
+  try {
+    if (!workspaceId) return { queued: 0 };
+    // Matches the plan gate the manual-run route enforces via
+    // requireActiveSubscription('ai.basic') — this path runs outside a
+    // request context, so it checks the same entitlement directly.
+    const { data: entitlement } = await supabaseAdmin.from('subscription_entitlements')
+      .select('enabled').eq('workspace_id', workspaceId).eq('feature_key', 'ai.basic').maybeSingle();
+    if (!entitlement?.enabled) return { queued: 0 };
+
+    const { data: automations, error } = await supabaseAdmin.from('automations')
+      .select('id,definition,retry_policy')
+      .eq('workspace_id', workspaceId).eq('status', 'active').eq('trigger_key', eventType);
+    if (error || !automations?.length) return { queued: 0 };
+
+    let queued = 0;
+    for (const automation of automations) {
+      const definition = (automation.definition ?? {}) as { conditions?: unknown[]; steps?: Array<{ tool: string; input?: Record<string, unknown> }> };
+      const conditions = Array.isArray(definition.conditions) ? definition.conditions : [];
+      if (!evaluateConditions(conditions, payload)) continue;
+
+      const steps = Array.isArray(definition.steps) ? definition.steps : [];
+      const hydratedSteps = steps.map((step) => ({ tool: step.tool, input: buildStepInput(step, payload) }));
+      const maxAttempts = Number((automation.retry_policy as any)?.maxAttempts || 5);
+      const dedupeKey = String(payload.jobId ?? payload.leadId ?? payload.appointmentId ?? payload.invoiceId ?? '');
+      const idempotencyKey = dedupeKey ? `event:${eventType}:${automation.id}:${dedupeKey}` : null;
+
+      const { error: insertError } = await supabaseAdmin.from('automation_runs').insert({
+        workspace_id: workspaceId, automation_id: automation.id, max_attempts: maxAttempts,
+        idempotency_key: idempotencyKey,
+        state: { source: 'event', eventType, hydratedSteps },
+      });
+      if (!insertError) queued++;
+      else if (!/duplicate key|unique constraint/i.test(insertError.message || '')) {
+        console.error(JSON.stringify({ level: 'error', component: 'automation_trigger', message: 'Failed to queue automation run', automationId: automation.id, error: insertError.message.slice(0, 200) }));
+      }
+    }
+    return { queued };
+  } catch (error: any) {
+    console.error(JSON.stringify({ level: 'error', component: 'automation_trigger', message: 'Event dispatch failed', eventType, error: String(error?.message || error).slice(0, 200) }));
+    return { queued: 0 };
   }
 }
 
@@ -137,16 +280,58 @@ export async function processAutomationRuns(limit = 5) {
           continue;
         }
 
-        const steps = (automation.definition?.steps ?? []) as Array<{ tool: string; input: Record<string, unknown> }>;
+        // A run that was previously blocked on approval comes back through
+        // this same queue once it is decided (see the /approvals/:id/decision
+        // route), still carrying its prior state. Steps already recorded as
+        // 'completed' must not be repeated (their side effects — e.g. an SMS
+        // — already happened); a step recorded as 'awaiting_approval' is
+        // re-checked against the real approval decision before it runs.
+        const definitionSteps = (automation.definition?.steps ?? []) as Array<{ tool: string; input: Record<string, unknown> }>;
+        const hydratedSteps = Array.isArray((run.state as any)?.hydratedSteps)
+          ? ((run.state as any).hydratedSteps as Array<{ tool: string; input: Record<string, unknown> }>)
+          : null;
+        // Event-triggered runs carry per-run inputs built from the triggering
+        // payload (see queueAutomationRun); manual runs fall back to the
+        // automation's saved (often still-empty) step input.
+        const steps = definitionSteps.map((step, index) => ({
+          tool: step.tool,
+          input: hydratedSteps?.[index]?.tool === step.tool ? hydratedSteps[index].input : step.input,
+        }));
+        const previousSteps = Array.isArray((run.state as any)?.steps) ? ((run.state as any).steps as Array<Record<string, unknown>>) : [];
         const results: Array<Record<string, unknown>> = [];
         let waitingForApproval = false;
 
-        for (const step of steps) {
+        for (let index = 0; index < steps.length; index++) {
+          const step = steps[index];
+          const prior = previousSteps[index];
+
+          if (prior?.status === 'completed') {
+            // Already executed on an earlier attempt (e.g. before a later
+            // step paused for approval) — reuse the recorded result.
+            results.push(prior);
+            continue;
+          }
+
+          if (prior?.status === 'awaiting_approval') {
+            const { data: approval } = await supabaseAdmin.from('approvals')
+              .select('status').eq('workspace_id', run.workspace_id).eq('resource_type', 'automation_step')
+              .eq('resource_id', run.id).eq('ai_action_id', String(prior.aiActionId ?? '')).maybeSingle();
+            if (approval?.status === 'rejected') throw new Error('APPROVAL_REJECTED');
+            if (approval?.status !== 'approved') {
+              // Not decided yet — this run should not have been requeued, but
+              // stay parked rather than re-running or erroring.
+              results.push(prior);
+              waitingForApproval = true;
+              break;
+            }
+            // Approved: fall through and execute the step now.
+          }
+
           const classified = classifyAutomationStep(step.tool);
           if (classified.stepClass === 'denied') {
             throw new Error(`TOOL_NOT_ALLOWED:${step.tool}`);
           }
-          if (classified.stepClass === 'approval') {
+          if (classified.stepClass === 'approval' && prior?.status !== 'awaiting_approval') {
             const { data: action } = await supabaseAdmin.from('ai_actions').insert({
               workspace_id: run.workspace_id, requested_by: 'automation', actor_type: 'automation_worker',
               tool_name: step.tool, risk_level: classified.risk, input: step.input,
@@ -165,7 +350,9 @@ export async function processAutomationRuns(limit = 5) {
             );
             results.push({ tool: step.tool, status: 'awaiting_approval', aiActionId: action?.id ?? null });
             waitingForApproval = true;
-            continue;
+            // Stop here: later steps must not run ahead of one still waiting
+            // on a human decision.
+            break;
           }
           const { output } = await executeAutomaticStep(run.workspace_id, step);
           results.push({ tool: step.tool, status: 'completed', output });
@@ -185,7 +372,11 @@ export async function processAutomationRuns(limit = 5) {
         processed++;
       } catch (error: any) {
         const message = String(error?.message || 'AUTOMATION_STEP_FAILED');
-        const exhausted = attempt >= Number(run.max_attempts || 5);
+        // A rejected approval is a terminal outcome, not a transient failure —
+        // never retry it. (In practice the approval decision route already
+        // moves a rejected run straight to 'cancelled' without requeueing it,
+        // so this is a safety net for a run that reaches here some other way.)
+        const exhausted = message === 'APPROVAL_REJECTED' || attempt >= Number(run.max_attempts || 5);
         const backoffSeconds = Math.min(3600, 30 * 2 ** attempt);
         const failedAt = new Date().toISOString();
         await supabaseAdmin.from('automation_attempts').insert({

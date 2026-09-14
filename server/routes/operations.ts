@@ -7,6 +7,7 @@ import { sendEmail, emailConfigured } from '../providers/email';
 import { hashShareToken, canDecideQuote } from './public';
 import { stripe } from './billing';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireSensitiveAuth, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit, writeNotification } from '../supabase';
+import { queueAutomationRun } from '../automation/runner';
 
 const router = Router();
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('booking.core'));
@@ -475,6 +476,10 @@ router.patch('/jobs/:id/status', requireRole('owner','admin','manager','staff'),
   if (error) return res.status(400).json({ error: 'JOB_UPDATE_FAILED' });
   if (!data) return res.status(404).json({ error: 'JOB_NOT_FOUND' });
   await writeAudit(req, 'job.status.changed', 'job', data.id, { from: current.status, to: req.body.status });
+  if (req.body.status === 'completed') {
+    // Best-effort: an automation dispatch failure must never break the job update.
+    void queueAutomationRun(req.workspaceId!, 'job.completed', { jobId: data.id, customerId: data.customer_id ?? null }).catch(() => undefined);
+  }
   res.json({ job: data });
 }));
 

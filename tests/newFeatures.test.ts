@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { canDecideQuote, hashShareToken } from '../server/routes/public';
 import { canVoidQuote } from '../server/routes/operations';
-import { classifyAutomationStep } from '../server/automation/runner';
+import { classifyAutomationStep, evaluateConditions, buildStepInput } from '../server/automation/runner';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const source = (relative: string) => readFileSync(join(here, '..', relative), 'utf8');
@@ -103,9 +103,11 @@ test('automation steps are classified before anything executes', () => {
   assert.deepEqual(classifyAutomationStep('customer.lookup'), { stepClass: 'execute', risk: 'low' });
   assert.deepEqual(classifyAutomationStep('review.request'), { stepClass: 'execute', risk: 'low' });
   assert.deepEqual(classifyAutomationStep('business.report'), { stepClass: 'execute', risk: 'low' });
-  // Registry entries are not automatically runnable. Until a complete
-  // provider-backed executor exists, an automation must reject the step.
-  assert.deepEqual(classifyAutomationStep('availability.check'), { stepClass: 'denied', risk: 'prohibited' });
+  // Registry entries are not automatically runnable until a complete
+  // provider-backed executor exists. availability.check has one (it reuses
+  // the public-booking slot generator), so it is executable; the others
+  // below still have no executor and must be rejected.
+  assert.deepEqual(classifyAutomationStep('availability.check'), { stepClass: 'execute', risk: 'low' });
   assert.deepEqual(classifyAutomationStep('appointment.book'), { stepClass: 'denied', risk: 'prohibited' });
   assert.deepEqual(classifyAutomationStep('message.send_template'), { stepClass: 'denied', risk: 'prohibited' });
   assert.deepEqual(classifyAutomationStep('quote.send'), { stepClass: 'denied', risk: 'prohibited' });
@@ -129,4 +131,66 @@ test('the automation runner claims atomically, retries and dead-letters', () => 
   const executeAt = runnerSource.indexOf('executeAutomaticStep(run.workspace_id, step)');
   assert.ok(deniedAt >= 0);
   assert.ok(executeAt > deniedAt);
+});
+
+test('business events hydrate step input from well-known payload fields without overwriting configured values', () => {
+  // This is the gap fix: the automation builder saves steps with input: {},
+  // and previously nothing ever filled that in for an event-triggered run.
+  const step = { tool: 'review.request', input: {} };
+  const hydrated = buildStepInput(step, { jobId: 'job-1', customerId: 'cust-1', unrelatedField: 'ignored' });
+  assert.deepEqual(hydrated, { jobId: 'job-1', customerId: 'cust-1' });
+
+  // A value already configured on the step is never clobbered by the event payload.
+  const preConfigured = buildStepInput({ tool: 'review.request', input: { jobId: 'pinned-job' } }, { jobId: 'job-1' });
+  assert.deepEqual(preConfigured, { jobId: 'pinned-job' });
+});
+
+test('trigger conditions support a documented {field,operator,value} subset and skip anything else', () => {
+  assert.equal(evaluateConditions([], {}), true);
+  assert.equal(evaluateConditions([{ field: 'estimatedValueCents', operator: 'gte', value: 10000 }], { estimatedValueCents: 15000 }), true);
+  assert.equal(evaluateConditions([{ field: 'estimatedValueCents', operator: 'gte', value: 10000 }], { estimatedValueCents: 5000 }), false);
+  assert.equal(evaluateConditions([{ field: 'source', operator: 'eq', value: 'website' }], { source: 'referral' }), false);
+  // An unsupported/undocumented condition shape is skipped (treated as
+  // non-blocking) rather than guessed at or thrown on.
+  assert.equal(evaluateConditions([{ any: 'shape' } as any], {}), true);
+  assert.equal(evaluateConditions(['not-an-object' as any], {}), true);
+});
+
+test('event dispatch is wired from lead creation, job completion, and has an availability.check executor', () => {
+  const runnerSource = source('server/automation/runner.ts');
+  assert.match(runnerSource, /export async function queueAutomationRun/);
+  assert.match(runnerSource, /case 'availability\.check'/);
+  assert.match(runnerSource, /generateBookingSlots/);
+  // availability.check must be advertised as automation-ready now that it has an executor.
+  assert.match(runnerSource, /'availability\.check',\r?\n\]\);/);
+
+  const crmSource = source('server/routes/crm.ts');
+  assert.match(crmSource, /queueAutomationRun\(req\.workspaceId!, 'lead\.created'/);
+
+  const operationsSource = source('server/routes/operations.ts');
+  assert.match(operationsSource, /queueAutomationRun\(req\.workspaceId!, 'job\.completed'/);
+});
+
+test('approving an automation-step approval requeues its run; rejecting cancels it', () => {
+  const intelligenceSource = source('server/routes/intelligence.ts');
+  const decisionRouteAt = intelligenceSource.indexOf("router.post('/approvals/:id/decision'");
+  assert.ok(decisionRouteAt >= 0);
+  const decisionRouteBody = intelligenceSource.slice(decisionRouteAt);
+  assert.match(decisionRouteBody, /resource_type === 'automation_step'/);
+  assert.match(decisionRouteBody, /status: 'queued'/);
+  assert.match(decisionRouteBody, /status: 'cancelled'/);
+  assert.match(decisionRouteBody, /'APPROVAL_REJECTED'/);
+  // The requeue must only touch a run that is actually still waiting, and
+  // must use the service-role client (browser clients cannot write
+  // automation_runs directly per the manual-run route's own comment).
+  assert.match(decisionRouteBody, /eq\('status', 'waiting'\)/);
+  assert.match(decisionRouteBody, /supabaseAdmin\.from\('automation_runs'\)/);
+
+  // The runner must not re-run a step already recorded as completed, and
+  // must stop the loop (not just `continue`) once a step is awaiting approval
+  // so later steps never run ahead of a pending human decision.
+  const runnerSource = source('server/automation/runner.ts');
+  assert.match(runnerSource, /prior\?\.status === 'completed'/);
+  assert.match(runnerSource, /prior\?\.status === 'awaiting_approval'/);
+  assert.match(runnerSource, /APPROVAL_REJECTED/);
 });

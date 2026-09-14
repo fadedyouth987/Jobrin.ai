@@ -60,6 +60,23 @@ router.post('/approvals/:id/decision', requireRole('owner','admin','manager'), v
   if (error) return res.status(400).json({ error: 'APPROVAL_DECISION_FAILED' });
   if (!data) return res.status(409).json({ error: 'APPROVAL_ALREADY_DECIDED_OR_MISSING' });
   await writeAudit(req, `approval.${req.body.decision}`, 'approval', data.id);
+  // An approval on an automation step is the only thing that can move its
+  // linked automation_runs row out of 'waiting'. Approving requeues the run
+  // so the runner picks it back up (it resumes rather than restarts — see
+  // the checkpointing in server/automation/runner.ts); rejecting is terminal.
+  // Browser clients cannot write automation_runs directly, so this uses the
+  // service-role client the same way the manual-run route does.
+  if (data.resource_type === 'automation_step' && data.resource_id) {
+    if (req.body.decision === 'approved') {
+      await supabaseAdmin.from('automation_runs')
+        .update({ status: 'queued', next_attempt_at: new Date().toISOString(), last_error: null })
+        .eq('workspace_id', req.workspaceId!).eq('id', data.resource_id).eq('status', 'waiting');
+    } else {
+      await supabaseAdmin.from('automation_runs')
+        .update({ status: 'cancelled', completed_at: new Date().toISOString(), last_error: 'APPROVAL_REJECTED' })
+        .eq('workspace_id', req.workspaceId!).eq('id', data.resource_id).eq('status', 'waiting');
+    }
+  }
   res.json({ approval: data });
 }));
 
