@@ -172,7 +172,24 @@ router.get('/conversations', asyncRoute(async (req: AuthenticatedRequest, res) =
     .select('id,subject,status,handling_mode,last_message_at,assigned_user_id,customer_id,customers(display_name,phone,email)')
     .eq('workspace_id', req.workspaceId!).order('last_message_at', { ascending: false, nullsFirst: false }).limit(200);
   if (error) return res.status(500).json({ error: 'CONVERSATION_LIST_FAILED' });
-  res.json({ conversations: data ?? [] });
+  const conversations = data ?? [];
+  // "Needs reply" = the most recent message in that thread was inbound (from
+  // the customer) and nobody has sent an outbound reply since. Real signal,
+  // not a fabricated unread flag: no per-user read-receipt column exists yet.
+  const ids = conversations.map((c: any) => c.id);
+  let needsReplyIds = new Set<string>();
+  if (ids.length) {
+    const { data: latest } = await db.from('messages').select('conversation_id,direction,created_at')
+      .eq('workspace_id', req.workspaceId!).in('conversation_id', ids)
+      .order('created_at', { ascending: false }).limit(1000);
+    const seen = new Set<string>();
+    for (const m of latest ?? []) {
+      if (seen.has(m.conversation_id)) continue;
+      seen.add(m.conversation_id);
+      if (m.direction === 'inbound') needsReplyIds.add(m.conversation_id);
+    }
+  }
+  res.json({ conversations: conversations.map((c: any) => ({ ...c, needsReply: needsReplyIds.has(c.id) })) });
 }));
 
 router.get('/conversations/:id', asyncRoute(async (req: AuthenticatedRequest, res) => {
