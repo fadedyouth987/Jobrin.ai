@@ -63,25 +63,28 @@ router.get('/jobs/:id', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const workspaceId = req.workspaceId!;
   const { data: job, error: jobError } = await db.from('jobs')
-    .select('id,job_number,title,description,status,address_text,scheduled_start,scheduled_end,completed_at,created_at,updated_at,customer_id,customers(id,display_name,phone,email),service_id,services(name),assigned_user_id')
+    .select('id,job_number,title,description,status,address_text,scheduled_start,scheduled_end,completed_at,created_at,updated_at,customer_id,customers(id,display_name,phone,email),service_id,services(name),assigned_user_id,appointment_id')
     .eq('workspace_id', workspaceId).eq('id', req.params.id).maybeSingle();
   if (jobError) return res.status(500).json({ error: 'JOB_READ_FAILED' });
   if (!job) return res.status(404).json({ error: 'JOB_NOT_FOUND' });
-  const [appointments, quotes, invoices, timeEntries, materials] = await Promise.all([
-    db.from('appointments').select('id,title,status,starts_at,ends_at,address_text,assigned_user_id').eq('workspace_id', workspaceId).eq('job_id', job.id).order('starts_at'),
+  // Jobs reference at most one appointment via jobs.appointment_id (appointments has no job_id column).
+  const appointmentResult = (job as any).appointment_id
+    ? await db.from('appointments').select('id,title,status,starts_at,ends_at,address_text,assigned_user_id').eq('workspace_id', workspaceId).eq('id', (job as any).appointment_id).maybeSingle()
+    : { data: null, error: null };
+  const [timeEntriesResult, materialsResult, quotesResult, invoicesResult] = await Promise.all([
     db.from('job_time_entries').select('id,user_id,started_at,ended_at,break_minutes,notes').eq('workspace_id', workspaceId).eq('job_id', job.id).order('started_at'),
     db.from('job_materials').select('id,description,supplier,quantity,unit_cost_cents,unit_price_cents,supplier_reference,created_at').eq('workspace_id', workspaceId).eq('job_id', job.id).order('created_at'),
     db.from('quotes').select('id,quote_number,status,total_cents,expires_at,created_at').eq('workspace_id', workspaceId).eq('job_id', job.id).order('created_at', { ascending: false }),
     db.from('invoices').select('id,invoice_number,status,total_cents,balance_due_cents,due_at,created_at').eq('workspace_id', workspaceId).eq('job_id', job.id).order('created_at', { ascending: false }),
   ]);
-  const relatedError = [appointments.error, quotes.error, invoices.error, timeEntries.error, materials.error].find(Boolean);
+  const relatedError = [appointmentResult.error, quotesResult.error, invoicesResult.error, timeEntriesResult.error, materialsResult.error].find(Boolean);
   if (relatedError) return res.status(500).json({ error: 'JOB_RELATED_READ_FAILED' });
-  const invoiceIds = (invoices.data ?? []).map((invoice: any) => invoice.id);
+  const invoiceIds = (invoicesResult.data ?? []).map((invoice: any) => invoice.id);
   const payments = invoiceIds.length
     ? await db.from('payments').select('id,status,amount_cents,paid_at,invoice_id,created_at').eq('workspace_id', workspaceId).in('invoice_id', invoiceIds).order('created_at', { ascending: false })
     : { data: [], error: null };
   if (payments.error) return res.status(500).json({ error: 'JOB_PAYMENT_READ_FAILED' });
-  res.json({ job, appointments: appointments.data ?? [], quotes: quotes.data ?? [], invoices: invoices.data ?? [], payments: payments.data ?? [], time_entries: timeEntries.data ?? [], materials: materials.data ?? [] });
+  res.json({ job, appointments: appointmentResult.data ? [appointmentResult.data] : [], quotes: quotesResult.data ?? [], invoices: invoicesResult.data ?? [], payments: payments.data ?? [], time_entries: timeEntriesResult.data ?? [], materials: materialsResult.data ?? [] });
 }));
 
 router.post('/jobs', requireRole('owner','admin','manager','staff'), validateBody(z.object({
