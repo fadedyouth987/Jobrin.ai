@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, CalendarClock, CheckCircle2, CircleDollarSign, ClipboardList, Clock3, FileText, Mail, MapPin, PenLine, Phone, UserRound } from 'lucide-react';
+import { ArrowLeft, Bot, BriefcaseBusiness, CalendarClock, CheckCircle2, CircleDollarSign, ClipboardList, Clock3, FileText, Mail, MapPin, MessageSquareMore, PenLine, Phone, Star, UserRound, Wallet } from 'lucide-react';
 import { useAuth } from '../app/auth';
 import { AppLink } from '../app/router';
 import { apiFetch } from '../lib/api';
@@ -81,15 +81,50 @@ export function JobDetailPage({ id }: { id: string }) {
   </div>;
 }
 
+// --- Business Timeline: one chronological stream for a customer, instead of
+// four disconnected cards (Jobs / Quotes+Invoices / Recent contact / Sales
+// history) that each sorted and scrolled independently. Reuses the same
+// interleaved-Activity idea JobDetailPage already uses for a single job.
+type TimelineEntry={id:string;icon:any;label:string;date:string|null;href?:string;tone:'slate'|'green'|'amber'|'red'|'indigo'};
+function customerTimelineEntries(data:any):TimelineEntry[] {
+  const {jobs=[],quotes=[],invoices=[],payments=[],calls=[],leads=[],messages=[],reviews=[],aiActions=[]}=data;
+  const money=(cents:number)=>new Intl.NumberFormat('en-AU',{style:'currency',currency:'AUD'}).format((cents||0)/100);
+  const entries:TimelineEntry[]=[
+    ...jobs.map((row:any)=>({id:`job:${row.id}`,icon:ClipboardList,label:`Job — ${row.title} (${row.status.replaceAll('_',' ')})`,date:row.created_at,href:`/app/jobs/${row.id}`,tone:tone(row.status)})),
+    ...quotes.map((row:any)=>({id:`quote:${row.id}`,icon:FileText,label:`Quote #${row.quote_number} ${row.status} — ${money(row.total_cents)}`,date:row.created_at,tone:tone(row.status)})),
+    ...invoices.map((row:any)=>({id:`invoice:${row.id}`,icon:CircleDollarSign,label:`Invoice #${row.invoice_number} ${row.status} — ${money(row.balance_due_cents)} owing`,date:row.created_at,tone:tone(row.status)})),
+    ...payments.map((row:any)=>({id:`payment:${row.id}`,icon:Wallet,label:`Payment ${row.status} — ${money(row.amount_cents)}`,date:row.paid_at||row.created_at,tone:row.status==='succeeded'?'green':'slate'as const})),
+    ...calls.map((row:any)=>({id:`call:${row.id}`,icon:Phone,label:`${row.direction==='inbound'?'Inbound':'Outbound'} call · ${row.status}${row.summary?` — ${row.summary}`:''}`,date:row.started_at,tone:'slate'as const})),
+    ...leads.map((row:any)=>({id:`lead:${row.id}`,icon:BriefcaseBusiness,label:`Lead — ${row.title} (${row.stage})`,date:row.created_at,tone:tone(row.stage)})),
+    ...messages.map((row:any)=>({id:`message:${row.id}`,icon:MessageSquareMore,label:`${row.direction==='inbound'?'Message from customer':'Message sent'}${row.body?`: "${String(row.body).slice(0,80)}${row.body.length>80?'…':''}"`:''}`,date:row.created_at,tone:'slate'as const})),
+    ...reviews.map((row:any)=>({id:`review:${row.id}`,icon:Star,label:`Review request ${row.status}${row.rating?` — ${row.rating}★`:''}`,date:row.completed_at||row.sent_at||row.created_at,tone:row.status==='completed'?'green':'slate'as const})),
+    ...aiActions.map((row:any)=>({id:`ai:${row.id}`,icon:Bot,label:`AI: ${String(row.tool_name||'action').replace(/_/g,' ')} (${row.status})`,date:row.created_at,tone:row.status==='completed'?'indigo':'slate'as const})),
+  ];
+  return entries.filter((e)=>e.date).sort((a,b)=>new Date(b.date as string).getTime()-new Date(a.date as string).getTime());
+}
+function BusinessTimeline({data}:{data:any}) {
+  const entries=useMemo(()=>customerTimelineEntries(data),[data]);
+  if(!entries.length)return <p className="p-5 text-sm text-slate-500">No activity recorded for this customer yet.</p>;
+  return <div className="divide-y divide-slate-100">{entries.map((entry)=>{
+    const Icon=entry.icon;
+    const dotTone={slate:'bg-slate-400',green:'bg-emerald-500',amber:'bg-amber-500',red:'bg-red-500',indigo:'bg-indigo-500'}[entry.tone];
+    const content=<div className="flex items-start gap-3 px-5 py-3"><span className="mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-slate-100 text-slate-600"><Icon className="h-4 w-4"/></span><div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-800">{entry.label}</p><p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-400"><span className={`h-1.5 w-1.5 rounded-full ${dotTone}`}/>{formatDate(entry.date)}</p></div></div>;
+    return entry.href?<AppLink key={entry.id} href={entry.href} className="block transition hover:bg-slate-50">{content}</AppLink>:<div key={entry.id}>{content}</div>;
+  })}</div>;
+}
+
 export function CustomerDetailPage({ id }: { id: string }) {
   const {workspaceId}=useAuth(); const [data,setData]=useState<any>(null); const [loading,setLoading]=useState(true); const [error,setError]=useState('');
   useEffect(()=>{if(!workspaceId)return;setLoading(true);apiFetch<any>(`/api/crm/customers/${id}`,{},workspaceId).then(setData).catch((err:any)=>setError(err.message)).finally(()=>setLoading(false))},[workspaceId,id]);
   if(loading)return <Spinner label="Loading customer workspace…"/>;
   if(error||!data)return <EmptyState title="Customer could not be opened" description={error||'Customer not found.'}/>;
-  const {customer,addresses,leads,jobs,quotes,invoices,payments,calls}=data; const outstanding=invoices.reduce((sum:number,row:any)=>sum+Number(row.balance_due_cents||0),0);
+  const {customer,addresses,jobs,invoices}=data; const outstanding=invoices.reduce((sum:number,row:any)=>sum+Number(row.balance_due_cents||0),0);
   return <div className="space-y-5"><div><AppLink href="/app/customers" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-500"><ArrowLeft className="h-4 w-4"/>Back to customers</AppLink><div className="mt-4 flex flex-col justify-between gap-4 lg:flex-row lg:items-end"><div><p className="text-xs font-bold uppercase tracking-wider text-indigo-600">Customer workspace</p><h1 className="mt-2 text-3xl font-black tracking-tight">{customer.display_name}</h1><div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-500">{customer.phone&&<a href={`tel:${customer.phone}`} className="inline-flex items-center gap-1.5"><Phone className="h-4 w-4"/>{customer.phone}</a>}{customer.email&&<a href={`mailto:${customer.email}`} className="inline-flex items-center gap-1.5"><Mail className="h-4 w-4"/>{customer.email}</a>}</div></div><AppLink href={`/app/jobs?customer=${customer.id}`} className="inline-flex rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white">Create job</AppLink></div></div>
     <div className="grid gap-4 md:grid-cols-3"><Metric label="Lifetime value" value={<Money cents={customer.lifetime_value_cents||0}/>}/><Metric label="Outstanding" value={<Money cents={outstanding}/>}/><Metric label="Jobs" value={String(jobs.length)}/></div>
-    <div className="grid gap-5 xl:grid-cols-[1.35fr_.65fr]"><div className="space-y-5"><Card className="overflow-hidden"><SectionHead title="Jobs"/><RecordTable rows={jobs.map((row:any)=>({id:row.id,label:row.title,status:row.status,value:formatDate(row.scheduled_start),href:`/app/jobs/${row.id}`}))} empty="No jobs for this customer."/></Card><Card className="overflow-hidden"><SectionHead title="Quotes and invoices"/><RecordTable rows={[...quotes.map((row:any)=>({id:`q${row.id}`,label:`Quote #${row.quote_number}`,status:row.status,value:new Intl.NumberFormat('en-AU',{style:'currency',currency:'AUD'}).format(row.total_cents/100)})),...invoices.map((row:any)=>({id:`i${row.id}`,label:`Invoice #${row.invoice_number}`,status:row.status,value:new Intl.NumberFormat('en-AU',{style:'currency',currency:'AUD'}).format(row.balance_due_cents/100)}))]} empty="No quotes or invoices for this customer."/></Card></div><div className="space-y-5"><Card className="p-5"><h2 className="font-bold">Customer details</h2><div className="mt-4 space-y-3 text-sm"><Detail label="Source" value={customer.source||'Not recorded'}/><Detail label="Notes" value={customer.notes||'No notes'}/><Detail label="Tags" value={(customer.tags||[]).join(', ')||'No tags'}/>{addresses.map((address:any)=><Detail key={address.id} label={address.label||'Address'} value={[address.street,address.suburb,address.state,address.postcode].filter(Boolean).join(', ')}/>)}</div></Card><Card className="p-5"><h2 className="font-bold">Recent contact</h2><div className="mt-4 space-y-3">{calls.slice(0,8).map((call:any)=><Activity key={call.id} label={`${call.direction} call · ${call.status}${call.summary?` · ${call.summary}`:''}`} date={call.started_at}/>)}{!calls.length&&<p className="text-sm text-slate-500">No calls recorded.</p>}</div></Card><Card className="p-5"><h2 className="font-bold">Sales history</h2><div className="mt-4 space-y-3">{leads.slice(0,8).map((lead:any)=><div key={lead.id} className="flex items-center justify-between gap-3 text-sm"><span className="font-medium">{lead.title}</span><StatusPill tone={tone(lead.stage)}>{lead.stage}</StatusPill></div>)}{!leads.length&&<p className="text-sm text-slate-500">No leads recorded.</p>}</div></Card></div></div>
+    <div className="grid gap-5 xl:grid-cols-[1.35fr_.65fr]">
+      <Card className="overflow-hidden"><SectionHead title="Business timeline"/><BusinessTimeline data={data}/></Card>
+      <div className="space-y-5"><Card className="p-5"><h2 className="font-bold">Customer details</h2><div className="mt-4 space-y-3 text-sm"><Detail label="Source" value={customer.source||'Not recorded'}/><Detail label="Notes" value={customer.notes||'No notes'}/><Detail label="Tags" value={(customer.tags||[]).join(', ')||'No tags'}/>{addresses.map((address:any)=><Detail key={address.id} label={address.label||'Address'} value={[address.street,address.suburb,address.state,address.postcode].filter(Boolean).join(', ')}/>)}</div></Card></div>
+    </div>
   </div>;
 }
 
@@ -98,7 +133,6 @@ function MoneyRow({icon:Icon,label,status,cents,suffix='' }:{icon:any;label:stri
 function Activity({label,date}:{label:string;date?:string|null}) { return <div className="flex gap-3"><span className="mt-1.5 h-2 w-2 flex-none rounded-full bg-indigo-500"/><div><p className="text-sm font-medium text-slate-800">{label}</p><p className="text-xs text-slate-400">{formatDate(date)}</p></div></div> }
 function Metric({label,value}:{label:string;value:ReactNode}) { return <Card className="p-5"><p className="text-xs font-semibold text-slate-500">{label}</p><div className="mt-2 text-3xl font-black">{value}</div></Card> }
 function SectionHead({title}:{title:string}) { return <div className="border-b border-slate-100 bg-slate-50 px-5 py-3"><h2 className="font-bold">{title}</h2></div> }
-function RecordTable({rows,empty}:{rows:Array<{id:string;label:string;status:string;value:string;href?:string}>;empty:string}) { if(!rows.length)return <div className="p-5 text-sm text-slate-500">{empty}</div>;return <div className="divide-y divide-slate-100">{rows.map(row=><div key={row.id} className="flex items-center gap-3 px-5 py-3"><div className="min-w-0 flex-1">{row.href?<AppLink href={row.href} className="font-semibold hover:text-indigo-700">{row.label}</AppLink>:<p className="font-semibold">{row.label}</p>}<p className="text-xs text-slate-500">{row.value}</p></div><StatusPill tone={tone(row.status)}>{row.status.replaceAll('_',' ')}</StatusPill></div>)}</div> }
 function Detail({label,value}:{label:string;value:string}) { return <div><p className="text-xs font-semibold text-slate-400">{label}</p><p className="mt-0.5 leading-6 text-slate-700">{value}</p></div> }
 
 // Draw-with-finger-or-mouse signature pad. Pointer events cover touch, pen and
