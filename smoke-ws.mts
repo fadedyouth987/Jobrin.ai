@@ -6,7 +6,8 @@ import { issueCallToken } from './server/ai/receptionistCall';
 const base = process.argv[2] ?? 'ws://localhost:3000';
 const workspaceId = '11111111-2222-3333-4444-555555555555';
 const callSid = `CAsmoke${Date.now()}`;
-const token = issueCallToken(workspaceId, callSid);
+const toNumber = '+61400000000';
+const token = issueCallToken(workspaceId, callSid, toNumber);
 
 const ws = new WebSocket(`${base}/api/receptionist/conversation?token=${encodeURIComponent(token)}`);
 
