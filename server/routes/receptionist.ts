@@ -6,6 +6,7 @@ import { issueCallToken, isReceptionistEngineAttached, isOverCallerHourlyLimit, 
 import { evaluateGoLiveChecklist } from '../ai/receptionistReadiness';
 import { normalizeE164, twilioConfigured } from '../providers/twilio';
 import { openaiConfigured } from '../providers/openai';
+import { mergeNumberOverrides, type WorkspacePhoneNumberRow } from '../phoneNumbers';
 import { asyncRoute, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireSensitiveAuth, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
 import { twilioSignatureGuard } from './communications';
@@ -176,9 +177,21 @@ webhookRouter.post('/voice', twilioSignatureGuard('/api/twilio/voice'), asyncRou
   const to = normalizeE164(String(req.body.To ?? ''));
   const from = normalizeE164(String(req.body.From ?? ''));
   const callSid = String(req.body.CallSid ?? '');
-  const { data: integration } = await supabaseAdmin.from('integrations').select('workspace_id').eq('provider','twilio').eq('external_account_id',to).eq('status','connected').maybeSingle();
+  // Multiple-phone-numbers routing: resolve the workspace (and any per-number
+  // profile overrides) from workspace_phone_numbers first -- this is the
+  // table that supports more than one number per workspace. Fall back to the
+  // legacy single-number `integrations` lookup for any workspace whose
+  // number predates that table (belt-and-suspenders; the migration backfills
+  // this from `integrations` on apply, so this should rarely be hit).
+  const { data: numberRow } = await supabaseAdmin.from('workspace_phone_numbers').select('*').eq('phone_number', to).eq('status', 'active').maybeSingle();
+  let integration: { workspace_id: string } | null = numberRow ? { workspace_id: numberRow.workspace_id as string } : null;
+  if (!integration) {
+    const { data: legacyIntegration } = await supabaseAdmin.from('integrations').select('workspace_id').eq('provider','twilio').eq('external_account_id',to).eq('status','connected').maybeSingle();
+    integration = legacyIntegration ?? null;
+  }
   if (!integration || !callSid) return res.status(404).type('text/xml').send(new twilio.twiml.VoiceResponse().toString());
-  const { data: profile } = await supabaseAdmin.from('receptionist_profiles').select('*').eq('workspace_id', integration.workspace_id).maybeSingle();
+  const { data: baseProfile } = await supabaseAdmin.from('receptionist_profiles').select('*').eq('workspace_id', integration.workspace_id).maybeSingle();
+  const profile = baseProfile ? mergeNumberOverrides(baseProfile, numberRow as WorkspacePhoneNumberRow | null) : baseProfile;
   const response = new twilio.twiml.VoiceResponse();
   if (!profile?.enabled || !env.OPENAI_API_KEY || !env.APP_URL.startsWith('https://')) {
     response.say({ language: 'en-AU' }, profile?.after_hours_message || 'Thanks for calling. The team is unavailable right now. Please try again later.');

@@ -22,6 +22,7 @@ const ResetPasswordPage = lazy(() =>
 const MfaPage = lazy(() => import("./pages/MfaPage"));
 const OnboardingPage = lazy(() => import("./pages/OnboardingPage"));
 const PublicQuotePage = lazy(() => import("./pages/PublicQuotePage"));
+const PublicReviewPage = lazy(() => import("./pages/PublicReviewPage"));
 const PublicBookingPage = lazy(() => import("./pages/PublicBookingPage"));
 const PrivacyPage = lazy(() =>
   import("./pages/PublicLegalPages").then((module) => ({
@@ -76,6 +77,8 @@ function Routes() {
   if (path === "/onboarding") return <OnboardingPage />;
   const quoteMatch = path.match(/^\/quote\/([A-Za-z0-9_-]+)$/);
   if (quoteMatch) return <PublicQuotePage token={quoteMatch[1]} />;
+  const reviewMatch = path.match(/^\/review\/([A-Za-z0-9_-]+)$/);
+  if (reviewMatch) return <PublicReviewPage token={reviewMatch[1]} />;
   const bookMatch = path.match(/^\/book\/([a-z0-9-]+)$/i);
   if (bookMatch) return <PublicBookingPage slug={bookMatch[1]} />;
   if (path.startsWith("/app")) return <AppShell />;

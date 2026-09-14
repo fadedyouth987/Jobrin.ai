@@ -8,10 +8,17 @@ export function emailConfigured() {
   return env.EMAIL_API_KEY.length >= 20 && /@/.test(env.EMAIL_FROM);
 }
 
+export type EmailAttachment = {
+  filename: string;
+  // Base64-encoded file content, per Resend's attachments API.
+  content: string;
+};
+
 export type EmailInput = {
   to: string;
   subject: string;
   text: string;
+  attachments?: EmailAttachment[];
 };
 
 export async function sendEmail(input: EmailInput): Promise<{ delivered: boolean; error?: string }> {
@@ -30,6 +37,7 @@ export async function sendEmail(input: EmailInput): Promise<{ delivered: boolean
         to: [input.to],
         subject: input.subject,
         text: input.text,
+        ...(input.attachments?.length ? { attachments: input.attachments } : {}),
       }),
     });
     if (!response.ok) {

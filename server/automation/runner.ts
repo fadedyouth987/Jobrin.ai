@@ -1,7 +1,11 @@
+import crypto from 'node:crypto';
 import { supabaseAdmin, writeNotification } from '../supabase';
 import { toolByName, requiresApproval, canExecute } from '../ai/toolRegistry';
-import { generateBookingSlots, type BusinessHourRule } from '../routes/public';
+import { generateBookingSlots, hashShareToken, type BusinessHourRule } from '../routes/public';
 import { purgeScheduledWorkspaceDeletions } from './workspacePurge';
+import { env } from '../env';
+import { normalizeE164, sendSms, twilioConfigured } from '../providers/twilio';
+import { emailConfigured, sendEmail } from '../providers/email';
 
 // Automation executor: processes the automation_runs queue that the Business
 // Brain worker alone previously left untouched. Runs are claimed atomically,
@@ -34,8 +38,12 @@ export function classifyAutomationStep(toolName: string): { stepClass: StepClass
   const tool = toolByName(toolName);
   if (!tool || tool.risk === 'prohibited' || !isAutomationExecutable(toolName)) return { stepClass: 'denied', risk: 'prohibited' };
   if (tool.risk === 'automatic') return { stepClass: 'execute', risk: 'low' };
-  // review.request only stages an internal queued record — nothing contacts a
-  // customer until delivery providers are configured and the owner sends it.
+  // review.request executes automatically (no human approval step) because
+  // its actual delivery is still self-gating: it only reaches a customer once
+  // a messaging provider is configured AND that customer has recorded
+  // transactional SMS consent (or a usable email), and it always respects
+  // suppression — see executeAutomaticStep below. Anything short of that
+  // records the request as suppressed/failed rather than pretending to send.
   if (toolName === 'review.request') return { stepClass: 'execute', risk: 'low' };
   if (requiresApproval(toolName)) return { stepClass: 'approval', risk: 'high' };
   if (canExecute(toolName)) return { stepClass: 'approval', risk: 'medium' };
@@ -85,13 +93,81 @@ async function executeAutomaticStep(workspaceId: string, step: { tool: string; i
       const jobId = String(step.input.jobId || '');
       const channel = step.input.channel === 'email' ? 'email' : 'sms';
       if (!jobId) throw new Error('REVIEW_REQUEST_INPUT_INVALID');
-      const { data: job, error: jobError } = await supabaseAdmin.from('jobs').select('id,customer_id').eq('workspace_id', workspaceId).eq('id', jobId).maybeSingle();
+      const { data: job, error: jobError } = await supabaseAdmin.from('jobs').select('id,customer_id,title').eq('workspace_id', workspaceId).eq('id', jobId).maybeSingle();
       if (jobError || !job?.customer_id) throw new Error('REVIEW_REQUEST_JOB_NOT_FOUND');
+      const { data: customer, error: customerError } = await supabaseAdmin.from('customers')
+        .select('id,display_name,phone,normalized_phone,email').eq('workspace_id', workspaceId).eq('id', job.customer_id).maybeSingle();
+      if (customerError || !customer) throw new Error('REVIEW_REQUEST_CUSTOMER_NOT_FOUND');
+      const { data: profile } = await supabaseAdmin.from('business_profiles').select('trading_name').eq('workspace_id', workspaceId).maybeSingle();
+      const businessName = profile?.trading_name || 'the business';
+
+      // The public response link's token is generated here and only its hash
+      // is ever stored (matching the quote/invoice share-link convention in
+      // server/routes/public.ts) — a database leak cannot reveal a live link.
+      const responseToken = crypto.randomBytes(24).toString('base64url');
       const { data: request, error } = await supabaseAdmin.from('review_requests').insert({
         workspace_id: workspaceId, customer_id: job.customer_id, job_id: job.id, channel, status: 'queued',
-      }).select('id,status').single();
+        response_token_hash: hashShareToken(responseToken),
+      }).select('id').single();
       if (error) throw new Error('REVIEW_REQUEST_CREATE_FAILED');
-      return { output: { reviewRequestId: request.id, status: request.status, note: 'Delivery starts once the messaging provider is configured.' } };
+
+      const reviewUrl = `${env.APP_URL.replace(/\/$/, '')}/review/${responseToken}`;
+      const greetingName = customer.display_name || 'there';
+      const messageBody = `Hi ${greetingName}, thanks for choosing ${businessName} for "${job.title}". We'd love your feedback: ${reviewUrl}`;
+
+      let deliveryStatus: 'sent' | 'suppressed' | 'failed' = 'failed';
+      let deliveryError: string | null = null;
+
+      if (channel === 'sms') {
+        const destination = normalizeE164(customer.normalized_phone || customer.phone || '');
+        if (!twilioConfigured()) {
+          deliveryError = 'TWILIO_NOT_CONFIGURED';
+        } else if (!/^\+[1-9]\d{7,14}$/.test(destination)) {
+          deliveryError = 'CUSTOMER_SMS_NUMBER_MISSING';
+        } else {
+          // Exactly the consent + suppression check used by the manual SMS
+          // send route (server/routes/communications.ts POST /sms): a
+          // transactional-purpose consent record must exist and be current,
+          // and the destination must not be on the suppression list. A
+          // review request never bypasses either check.
+          const [{ data: latestConsent, error: consentError }, { data: suppression, error: suppressionError }] = await Promise.all([
+            supabaseAdmin.from('customer_consents').select('granted,revoked_at').eq('workspace_id', workspaceId).eq('customer_id', customer.id)
+              .eq('channel', 'sms').eq('purpose', 'transactional').order('recorded_at', { ascending: false }).limit(1).maybeSingle(),
+            supabaseAdmin.from('suppression_entries').select('id').eq('workspace_id', workspaceId).eq('channel', 'sms').eq('value', destination).maybeSingle(),
+          ]);
+          if (consentError || suppressionError) {
+            deliveryError = 'SMS_PERMISSION_CHECK_FAILED';
+          } else if (suppression) {
+            deliveryStatus = 'suppressed'; deliveryError = 'SUPPRESSED';
+          } else if (!latestConsent?.granted || latestConsent.revoked_at) {
+            deliveryStatus = 'suppressed'; deliveryError = 'CONSENT_MISSING';
+          } else {
+            try {
+              await sendSms({ to: destination, body: messageBody.slice(0, 1600), statusCallback: `${env.APP_URL.replace(/\/$/, '')}/api/twilio/status` });
+              deliveryStatus = 'sent';
+            } catch {
+              deliveryError = 'SMS_SEND_FAILED';
+            }
+          }
+        }
+      } else {
+        if (!emailConfigured()) {
+          deliveryError = 'EMAIL_NOT_CONFIGURED';
+        } else if (!customer.email) {
+          deliveryError = 'CUSTOMER_EMAIL_MISSING';
+        } else {
+          const result = await sendEmail({ to: customer.email, subject: `How did we do, ${greetingName}?`, text: messageBody });
+          if (result.delivered) deliveryStatus = 'sent';
+          else deliveryError = result.error || 'EMAIL_SEND_FAILED';
+        }
+      }
+
+      const now = new Date().toISOString();
+      await supabaseAdmin.from('review_requests').update({
+        status: deliveryStatus, sent_at: deliveryStatus === 'sent' ? now : null, delivery_error: deliveryError,
+      }).eq('id', request.id).eq('workspace_id', workspaceId);
+
+      return { output: { reviewRequestId: request.id, status: deliveryStatus, ...(deliveryError ? { deliveryError } : {}) } };
     }
     case 'availability.check': {
       const serviceId = step.input.serviceId ? String(step.input.serviceId) : null;

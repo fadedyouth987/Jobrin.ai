@@ -3,7 +3,20 @@ import { z } from 'zod';
 import { applyKeysetCursor, asyncRoute, buildPage, parseCursor, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
 import { operatorTools, toolByName } from '../ai/toolRegistry';
-import { isAutomationExecutable } from '../automation/runner';
+import { buildStepInput, isAutomationExecutable } from '../automation/runner';
+
+// Placeholder values for the event-hydrated fields (see EVENT_INPUT_FIELDS in
+// server/automation/runner.ts) an automation step's saved input can rely on
+// being filled in at trigger time from the real event payload (e.g. jobId on
+// a job.completed trigger). Only used to validate that a step's input is
+// otherwise well-formed at save time — never persisted or executed.
+const AUTOMATION_VALIDATION_EVENT_PAYLOAD: Record<string, string> = {
+  jobId: '00000000-0000-0000-0000-000000000000',
+  customerId: '00000000-0000-0000-0000-000000000000',
+  leadId: '00000000-0000-0000-0000-000000000000',
+  appointmentId: '00000000-0000-0000-0000-000000000000',
+  invoiceId: '00000000-0000-0000-0000-000000000000',
+};
 
 const router = Router();
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('ai.basic'));
@@ -144,7 +157,17 @@ const automationSchema=z.object({
 router.post('/automations',requireRole('owner','admin','manager'),validateBody(automationSchema),asyncRoute(async(req:AuthenticatedRequest,res)=>{
   const invalid=req.body.definition.steps.find((step:{tool:string,input:Record<string,unknown>})=>{
     const tool=toolByName(step.tool);
-    return !tool||!isAutomationExecutable(step.tool)||!tool.schema.safeParse(step.input).success;
+    if(!tool||!isAutomationExecutable(step.tool))return true;
+    if(tool.schema.safeParse(step.input).success)return false;
+    // Some tools' schemas require a field only the trigger event fills in at
+    // run time (see EVENT_INPUT_FIELDS / buildStepInput in
+    // server/automation/runner.ts) — e.g. review.request's jobId on a
+    // job.completed trigger, never known when the automation is saved.
+    // Retry validation against that hydrated shape before rejecting, so
+    // those event-only fields don't block creation while a genuinely
+    // missing/invalid static field (e.g. an unset channel) still does.
+    const hydrated=req.body.trigger_key==='schedule.cron'?step.input:buildStepInput(step,AUTOMATION_VALIDATION_EVENT_PAYLOAD);
+    return !tool.schema.safeParse(hydrated).success;
   });
   if(invalid)return res.status(400).json({error:'AUTOMATION_TOOL_NOT_READY_OR_INPUT_INVALID',tool:invalid.tool});
   const db=createUserClient(req.auth!.accessToken);
@@ -182,7 +205,7 @@ router.get('/reviews', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const limit = 300;
   const cursor = parseCursor(req.query.cursor);
-  let query = db.from('review_requests').select('id,channel,status,rating,feedback,sent_at,completed_at,created_at,customer_id,customers(display_name),job_id').eq('workspace_id', req.workspaceId!);
+  let query = db.from('review_requests').select('id,channel,status,rating,feedback,delivery_error,sent_at,completed_at,created_at,customer_id,customers(display_name),job_id').eq('workspace_id', req.workspaceId!);
   query = applyKeysetCursor(query, cursor);
   const { data, error } = await query.order('created_at',{ascending:false}).order('id',{ascending:false}).limit(limit + 1);
   if (error) return res.status(500).json({ error: 'REVIEW_LIST_FAILED' });

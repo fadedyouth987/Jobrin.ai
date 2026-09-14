@@ -20,6 +20,16 @@ type Integration = {
 type Readiness = Record<"stripe" | "twilio" | "email" | "openai", boolean>;
 type Payload = { integrations: Integration[]; readiness: Readiness };
 
+type PhoneNumber = {
+  id: string;
+  phone_number: string;
+  label: string;
+  is_primary: boolean;
+  status: "active" | "inactive";
+  display_name_override: string | null;
+  greeting_override: string | null;
+};
+
 const providers = [
   [
     "stripe",
@@ -64,6 +74,11 @@ export function IntegrationsPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [numbers, setNumbers] = useState<PhoneNumber[]>([]);
+  const [numbersError, setNumbersError] = useState("");
+  const [numbersBusy, setNumbersBusy] = useState(false);
+  const [newNumber, setNewNumber] = useState("");
+  const [newLabel, setNewLabel] = useState("");
 
   const load = async () => {
     if (!workspaceId) return;
@@ -77,9 +92,72 @@ export function IntegrationsPage() {
       setLoading(false);
     }
   };
+  const loadNumbers = async () => {
+    if (!workspaceId) return;
+    try {
+      const payload = await apiFetch<{ numbers: PhoneNumber[] }>(
+        "/api/integrations/numbers",
+        {},
+        workspaceId,
+      );
+      setNumbers(payload.numbers);
+    } catch (err: any) {
+      setNumbersError(err.message || "Could not load phone numbers.");
+    }
+  };
   useEffect(() => {
     void load();
+    void loadNumbers();
   }, [workspaceId]);
+
+  const addNumber = async () => {
+    if (!workspaceId || !newNumber.trim()) return;
+    setNumbersBusy(true);
+    setNumbersError("");
+    try {
+      await apiFetch(
+        "/api/integrations/numbers",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            phone_number: newNumber.trim(),
+            label: newLabel.trim() || "Untitled line",
+          }),
+        },
+        workspaceId,
+      );
+      setNewNumber("");
+      setNewLabel("");
+      await loadNumbers();
+    } catch (err: any) {
+      setNumbersError(err.message || "Could not add that number.");
+    } finally {
+      setNumbersBusy(false);
+    }
+  };
+
+  const toggleNumberStatus = async (number: PhoneNumber) => {
+    if (!workspaceId) return;
+    setNumbersBusy(true);
+    setNumbersError("");
+    try {
+      await apiFetch(
+        `/api/integrations/numbers/${number.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            status: number.status === "active" ? "inactive" : "active",
+          }),
+        },
+        workspaceId,
+      );
+      await loadNumbers();
+    } catch (err: any) {
+      setNumbersError(err.message || "Could not update that number.");
+    } finally {
+      setNumbersBusy(false);
+    }
+  };
 
   const activateTwilio = async () => {
     if (!workspaceId) return;
@@ -197,6 +275,108 @@ export function IntegrationsPage() {
             </Card>
           );
         })}
+      </div>
+
+      <div className="mt-10">
+        <p className="text-xs font-bold uppercase tracking-[.18em] text-indigo-600">
+          Twilio
+        </p>
+        <h2 className="mt-1 text-xl font-black tracking-tight">
+          Phone numbers
+        </h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+          Every number below routes inbound calls and SMS to this workspace.
+          A number without an override uses the workspace's default
+          receptionist settings; give it its own greeting or voice on the
+          receptionist page to make it sound different. The number must
+          already exist in your Twilio account with its voice webhook
+          pointed at this app before adding it here.
+        </p>
+        {numbersError && (
+          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {numbersError}
+          </div>
+        )}
+        <Card className="mt-4 p-5">
+          {numbers.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              No phone numbers yet. Activate Twilio above, or add a number
+              below.
+            </p>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {numbers.map((number) => (
+                <div
+                  key={number.id}
+                  className="flex flex-wrap items-center justify-between gap-3 py-3"
+                >
+                  <div>
+                    <p className="font-semibold">
+                      {number.label}
+                      {number.is_primary && (
+                        <span className="ml-2 text-xs font-normal text-slate-400">
+                          primary
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      {number.phone_number}
+                      {(number.greeting_override ||
+                        number.display_name_override) && (
+                        <span className="ml-2 text-xs text-indigo-500">
+                          custom greeting
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <StatusPill
+                      tone={number.status === "active" ? "green" : "slate"}
+                    >
+                      {number.status}
+                    </StatusPill>
+                    <SecondaryButton
+                      disabled={numbersBusy}
+                      onClick={() => void toggleNumberStatus(number)}
+                    >
+                      {number.status === "active" ? "Deactivate" : "Activate"}
+                    </SecondaryButton>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-slate-100 pt-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500">
+                Phone number (E.164, e.g. +61491234567)
+              </label>
+              <input
+                className="mt-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                value={newNumber}
+                onChange={(event) => setNewNumber(event.target.value)}
+                placeholder="+61491234567"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500">
+                Label
+              </label>
+              <input
+                className="mt-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                value={newLabel}
+                onChange={(event) => setNewLabel(event.target.value)}
+                placeholder="e.g. Northside branch"
+              />
+            </div>
+            <PrimaryButton
+              disabled={numbersBusy || !newNumber.trim()}
+              onClick={() => void addNumber()}
+            >
+              {numbersBusy ? "Adding…" : "Add number"}
+            </PrimaryButton>
+          </div>
+        </Card>
       </div>
     </div>
   );

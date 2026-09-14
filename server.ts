@@ -20,6 +20,7 @@ import businessBrainRouter from './server/routes/businessBrain';
 import hiringRouter from './server/routes/hiring';
 import notificationsRouter from './server/routes/notifications';
 import assetsRouter from './server/routes/assets';
+import purchasingRouter from './server/routes/purchasing';
 import publicRouter from './server/routes/public';
 import { emailConfigured } from './server/providers/email';
 
@@ -82,6 +83,7 @@ app.use('/api/business-brain', businessBrainRouter);
 app.use('/api/hiring', hiringRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/assets', assetsRouter);
+app.use('/api/purchasing', purchasingRouter);
 // Public customer-facing document links require no user session and enforce
 // their own strict rate limit.
 app.use('/api/public', publicRouter);

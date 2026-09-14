@@ -84,8 +84,19 @@ export function twilioSignatureGuard(path: string): RequestHandler {
 }
 
 async function assignedWorkspace(to: string) {
+  const number = normalizeE164(to);
+  // Multiple-phone-numbers routing: resolve via workspace_phone_numbers
+  // first (supports more than one number per workspace); fall back to the
+  // legacy single-number `integrations` lookup for any number that predates
+  // that table (the migration backfills this on apply, so this is
+  // belt-and-suspenders, not the primary path).
+  const { data: numberRows, error: numberError } = await supabaseAdmin.from('workspace_phone_numbers').select('workspace_id')
+    .eq('phone_number', number).eq('status', 'active').limit(2);
+  if (numberError) throw new Error('TWILIO_TENANT_LOOKUP_FAILED');
+  if (numberRows?.length === 1) return numberRows[0].workspace_id as string;
+  if (numberRows && numberRows.length > 1) return null;
   const { data, error } = await supabaseAdmin.from('integrations').select('workspace_id')
-    .eq('provider', 'twilio').eq('external_account_id', normalizeE164(to)).eq('status', 'connected').limit(2);
+    .eq('provider', 'twilio').eq('external_account_id', number).eq('status', 'connected').limit(2);
   if (error) throw new Error('TWILIO_TENANT_LOOKUP_FAILED');
   if (data?.length !== 1) return null;
   return data[0].workspace_id as string;

@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { asyncRoute } from '../security';
 import { rateLimit } from 'express-rate-limit';
 import { TimerFreeMemoryStore } from '../rateLimitStore';
-import { supabaseAdmin } from '../supabase';
+import { supabaseAdmin, writeNotification } from '../supabase';
 
 // Public customer-facing document links. Capability is the unguessable token in
 // the URL; only its SHA-256 hash is stored, so a database leak cannot reveal
@@ -122,6 +122,94 @@ router.post('/quotes/:token/decision', asyncRoute(async (req, res) => {
   });
 
   res.json({ status: updated.status, acceptedAt: updated.accepted_at });
+}));
+
+// ---------- Public review response ----------
+// Same capability model as the quote link above: the token in the URL is the
+// only credential, only its SHA-256 hash is ever stored
+// (review_requests.response_token_hash), and the route returns only what a
+// customer needs to leave a rating — never internal workspace data.
+
+router.get('/review/:token', asyncRoute(async (req, res) => {
+  const token = String(req.params.token || '');
+  if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) return linkNotFound(res);
+
+  const { data: request, error } = await supabaseAdmin
+    .from('review_requests')
+    .select('id,workspace_id,job_id,channel,status,rating,feedback,created_at')
+    .eq('response_token_hash', hashShareToken(token))
+    .maybeSingle();
+  if (error || !request) return linkNotFound(res);
+
+  const [jobResult, profileResult] = await Promise.all([
+    request.job_id
+      ? supabaseAdmin.from('jobs').select('title,completed_at').eq('workspace_id', request.workspace_id).eq('id', request.job_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    supabaseAdmin.from('business_profiles').select('trading_name,phone').eq('workspace_id', request.workspace_id).maybeSingle(),
+  ]);
+
+  // Click tracking: mark as clicked exactly once, without blocking the view —
+  // mirrors the "mark viewed once" pattern on the quote link above.
+  let status = request.status;
+  if (status === 'sent') {
+    await supabaseAdmin.from('review_requests').update({ status: 'clicked' })
+      .eq('id', request.id).eq('workspace_id', request.workspace_id).eq('status', 'sent');
+    status = 'clicked';
+  }
+
+  res.json({
+    request: { status, rating: request.rating, feedback: request.feedback },
+    job: jobResult.data ? { title: jobResult.data.title, completedAt: jobResult.data.completed_at } : null,
+    business: profileResult.data ?? {},
+  });
+}));
+
+router.post('/review/:token', asyncRoute(async (req, res) => {
+  const token = String(req.params.token || '');
+  if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) return linkNotFound(res);
+  const parsed = z.object({ rating: z.number().int().min(1).max(5), comment: z.string().trim().max(2000).optional() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'VALIDATION_FAILED' });
+
+  const { data: request, error } = await supabaseAdmin
+    .from('review_requests')
+    .select('id,workspace_id,job_id,status,rating,feedback')
+    .eq('response_token_hash', hashShareToken(token))
+    .maybeSingle();
+  if (error || !request) return linkNotFound(res);
+
+  // Idempotent: a repeated submit returns the already-recorded response
+  // instead of erroring or double-recording (mirrors the quote decision route).
+  if (request.status === 'completed') {
+    return res.json({ status: 'completed', rating: request.rating, feedback: request.feedback });
+  }
+  if (!['sent', 'clicked'].includes(request.status)) {
+    return res.status(409).json({ error: 'REVIEW_REQUEST_NOT_RESPONDABLE', status: request.status });
+  }
+
+  const now = new Date().toISOString();
+  const { data: updated, error: updateError } = await supabaseAdmin
+    .from('review_requests')
+    .update({ status: 'completed', rating: parsed.data.rating, feedback: parsed.data.comment ?? null, completed_at: now })
+    .eq('id', request.id).eq('workspace_id', request.workspace_id)
+    .in('status', ['sent', 'clicked'])
+    .select('status,rating,feedback').single();
+  if (updateError || !updated) return res.status(409).json({ error: 'REVIEW_RESPONSE_CONFLICT' });
+
+  await supabaseAdmin.from('audit_logs').insert({
+    workspace_id: request.workspace_id, action: 'review.customer_responded', entity_type: 'review_request',
+    entity_id: request.id, details: { via: 'public_link', rating: parsed.data.rating, jobId: request.job_id },
+  });
+  // Unhappy feedback is captured privately and surfaced to the owner instead
+  // of being left to sit in a list — matches the ReviewsPage description's
+  // promise ("Unhappy feedback is captured privately first...").
+  if (parsed.data.rating <= 3) {
+    await writeNotification(
+      request.workspace_id, 'review.negative_feedback', 'A customer left critical review feedback',
+      `Rating ${parsed.data.rating}/5 — review it before it goes anywhere public.`, 'review_request', request.id,
+    );
+  }
+
+  res.json({ status: updated.status, rating: updated.rating, feedback: updated.feedback });
 }));
 
 // ---------- Public booking ----------

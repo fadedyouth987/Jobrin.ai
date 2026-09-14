@@ -8,6 +8,8 @@ import { hashShareToken, canDecideQuote } from './public';
 import { stripe } from './billing';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireSensitiveAuth, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit, writeNotification } from '../supabase';
 import { queueAutomationRun } from '../automation/runner';
+import { draftJobRecap } from '../ai/jobRecap';
+import { generateDocumentPdf, type DocumentPdfInput } from '../documents/pdfGenerator';
 
 const router = Router();
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('booking.core'));
@@ -480,6 +482,74 @@ router.get('/jobs/:id/report', requireRole('owner', 'admin', 'manager', 'staff')
   res.json({ job, time_entries: timeEntries.data ?? [], materials: materials.data ?? [], checklists: checklists.data ?? [], signature: signatures.data?.[0] ?? null });
 }));
 
+// 5b. AI post-work recap — drafted best-effort on job completion
+// (draftJobRecap in server/ai/jobRecap.ts); reviewed, edited and
+// approved/sent here. Draft-only until a human explicitly acts on it.
+router.get('/jobs/:id/recap', requireRole('owner', 'admin', 'manager', 'staff'), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data: job, error: jobError } = await db.from('jobs').select('id').eq('workspace_id', req.workspaceId!).eq('id', req.params.id).maybeSingle();
+  if (jobError) return res.status(500).json({ error: 'JOB_READ_FAILED' });
+  if (!job) return res.status(404).json({ error: 'JOB_NOT_FOUND' });
+  const { data: recap, error } = await db.from('job_recaps').select('id,draft_text,status,approved_at,sent_at,created_at,updated_at')
+    .eq('workspace_id', req.workspaceId!).eq('job_id', req.params.id).maybeSingle();
+  if (error) return res.status(500).json({ error: 'RECAP_READ_FAILED' });
+  res.json({ recap: recap ?? null });
+}));
+
+router.patch('/jobs/:id/recap', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(z.object({
+  draft_text: z.string().trim().min(1).max(4000).optional(),
+  status: z.enum(['approved', 'discarded']).optional(),
+})), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  if (req.body.draft_text === undefined && req.body.status === undefined) return res.status(400).json({ error: 'RECAP_UPDATE_EMPTY' });
+  const db = createUserClient(req.auth!.accessToken);
+  const { data: recap, error: readError } = await db.from('job_recaps').select('id,status').eq('workspace_id', req.workspaceId!).eq('job_id', req.params.id).maybeSingle();
+  if (readError) return res.status(500).json({ error: 'RECAP_READ_FAILED' });
+  if (!recap) return res.status(404).json({ error: 'RECAP_NOT_FOUND' });
+  if (recap.status === 'sent') return res.status(409).json({ error: 'RECAP_ALREADY_SENT' });
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (req.body.draft_text !== undefined) patch.draft_text = req.body.draft_text;
+  if (req.body.status === 'approved') { patch.status = 'approved'; patch.approved_by = req.auth!.userId; patch.approved_at = new Date().toISOString(); }
+  if (req.body.status === 'discarded') patch.status = 'discarded';
+  const { data: updated, error } = await db.from('job_recaps').update(patch).eq('workspace_id', req.workspaceId!).eq('id', recap.id)
+    .select('id,draft_text,status,approved_at,sent_at,created_at,updated_at').single();
+  if (error || !updated) return res.status(400).json({ error: 'RECAP_UPDATE_FAILED' });
+  await writeAudit(req, req.body.status === 'approved' ? 'job.recap.approved' : req.body.status === 'discarded' ? 'job.recap.discarded' : 'job.recap.edited', 'job_recap', updated.id);
+  res.json({ recap: updated });
+}));
+
+router.post('/jobs/:id/recap/send', requireRole('owner', 'admin', 'manager', 'staff'), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data: job, error: jobError } = await db.from('jobs').select('id,job_number,customer_id,customers(display_name,email)').eq('workspace_id', req.workspaceId!).eq('id', req.params.id).maybeSingle();
+  if (jobError) return res.status(500).json({ error: 'JOB_READ_FAILED' });
+  if (!job) return res.status(404).json({ error: 'JOB_NOT_FOUND' });
+  const { data: recap, error: recapError } = await db.from('job_recaps').select('id,draft_text,status').eq('workspace_id', req.workspaceId!).eq('job_id', job.id).maybeSingle();
+  if (recapError) return res.status(500).json({ error: 'RECAP_READ_FAILED' });
+  if (!recap) return res.status(404).json({ error: 'RECAP_NOT_FOUND' });
+  if (recap.status === 'sent') return res.status(409).json({ error: 'RECAP_ALREADY_SENT' });
+  if (recap.status === 'discarded') return res.status(409).json({ error: 'RECAP_DISCARDED' });
+
+  // Fail closed and honestly: never report a send as successful unless email
+  // is actually configured and the customer actually has an address on file,
+  // matching the quote/invoice send pattern above.
+  if (!emailConfigured()) return res.status(409).json({ error: 'EMAIL_NOT_CONFIGURED', message: 'Email delivery is not configured for this workspace. Approve and keep the recap for your records instead.' });
+  const customer = Array.isArray(job.customers) ? job.customers[0] : job.customers;
+  if (!customer?.email) return res.status(409).json({ error: 'NO_CUSTOMER_EMAIL', message: 'This customer has no email on file. Approve and keep the recap for your records instead.' });
+
+  const result = await sendEmail({
+    to: customer.email,
+    subject: `Your job #${job.job_number} — work summary`,
+    text: `Hi ${customer.display_name || 'there'},\n\n${recap.draft_text}\n\nThank you for your business.`,
+  });
+  if (!result.delivered) return res.status(502).json({ error: 'EMAIL_SEND_FAILED', message: 'The recap was not sent. It remains available to retry.' });
+
+  const now = new Date().toISOString();
+  const { data: updated, error: updateError } = await db.from('job_recaps').update({ status: 'sent', sent_at: now, approved_by: req.auth!.userId, approved_at: now, updated_at: now })
+    .eq('workspace_id', req.workspaceId!).eq('id', recap.id).eq('status', recap.status).select('id,draft_text,status,approved_at,sent_at').single();
+  if (updateError || !updated) return res.status(409).json({ error: 'RECAP_SEND_CONFLICT' });
+  await writeAudit(req, 'job.recap.sent', 'job_recap', updated.id, { customer_id: job.customer_id });
+  res.json({ recap: updated });
+}));
+
 export const jobStatusTransitions: Record<string, string[]> = {
   new: ['scheduled', 'in_progress', 'cancelled'],
   scheduled: ['on_the_way', 'in_progress', 'cancelled'],
@@ -521,6 +591,11 @@ router.patch('/jobs/:id/status', requireRole('owner','admin','manager','staff'),
   if (req.body.status === 'completed') {
     // Best-effort: an automation dispatch failure must never break the job update.
     void queueAutomationRun(req.workspaceId!, 'job.completed', { jobId: data.id, customerId: data.customer_id ?? null }).catch(() => undefined);
+    // Best-effort AI post-work recap draft: bounded single OpenAI call, metered,
+    // never blocks or fails the status update (server/ai/jobRecap.ts).
+    void draftJobRecap(req.workspaceId!, data.id).catch((error) => {
+      console.error(JSON.stringify({ level: 'error', component: 'job_recap', message: 'Recap draft dispatch failed', workspaceId: req.workspaceId, jobId: data.id, error: String((error as Error)?.message || error).slice(0, 200) }));
+    });
   }
   res.json({ job: data });
 }));
@@ -559,6 +634,62 @@ async function verifyDocumentParents(db: ReturnType<typeof createUserClient>, wo
   if (jobError || !job || (job.customer_id && job.customer_id !== customerId)) return 'JOB_NOT_FOUND';
   return null;
 }
+
+// Shared loader for the data a quote/invoice PDF needs: the document itself,
+// its line items, the customer and the workspace's business profile (for
+// the branded header). Used by both the download route and the send-email
+// attachment path so the two can never drift.
+async function buildDocumentPdfInput(
+  db: ReturnType<typeof createUserClient>,
+  workspaceId: string,
+  kind: 'quote' | 'invoice',
+  id: string,
+): Promise<DocumentPdfInput | null> {
+  const table = kind === 'quote' ? 'quotes' : 'invoices';
+  const itemsTable = kind === 'quote' ? 'quote_items' : 'invoice_items';
+  const numberColumn = kind === 'quote' ? 'quote_number' : 'invoice_number';
+  const select = kind === 'quote'
+    ? `id,${numberColumn},status,created_at,expires_at,subtotal_cents,gst_cents,total_cents,deposit_cents,notes,terms,customer_id,customers(display_name,email)`
+    : `id,${numberColumn},status,created_at,due_at,subtotal_cents,gst_cents,total_cents,balance_due_cents,customer_id,customers(display_name,email)`;
+  const { data: docRow, error: docError } = await db.from(table).select(select).eq('workspace_id', workspaceId).eq('id', id).maybeSingle();
+  if (docError || !docRow) return null;
+  const row = docRow as any;
+  const { data: items, error: itemsError } = await db.from(itemsTable).select('description,quantity,unit_price_cents,gst_rate').eq('workspace_id', workspaceId).eq(`${kind}_id`, id).order('sort_order');
+  if (itemsError) return null;
+  const { data: business } = await db.from('business_profiles').select('trading_name,abn,gst_registered,phone,email,website,street_address,suburb,state,postcode').eq('workspace_id', workspaceId).maybeSingle();
+  const customer = Array.isArray(row.customers) ? row.customers[0] : row.customers;
+
+  return {
+    kind,
+    number: row[numberColumn],
+    status: row.status,
+    createdAt: row.created_at,
+    dueOrExpiresAt: kind === 'quote' ? row.expires_at : row.due_at,
+    business: business || null,
+    customer: customer || null,
+    items: (items || []).map((item: any) => ({ description: item.description, quantity: Number(item.quantity), unit_price_cents: Number(item.unit_price_cents), gst_rate: Number(item.gst_rate) })),
+    subtotalCents: Number(row.subtotal_cents),
+    gstCents: Number(row.gst_cents),
+    totalCents: Number(row.total_cents),
+    depositCents: kind === 'quote' ? Number(row.deposit_cents || 0) : null,
+    balanceDueCents: kind === 'invoice' ? Number(row.balance_due_cents) : null,
+    notes: kind === 'quote' ? row.notes || null : null,
+    terms: kind === 'quote' ? row.terms || null : null,
+  };
+}
+
+// Branded PDF download. Same read access as the list route above — no extra
+// role gating, since anyone who can see the quote can already see its
+// numbers; the PDF is just another view of the same data.
+router.get('/quotes/:id/pdf', asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const input = await buildDocumentPdfInput(db, req.workspaceId!, 'quote', String(req.params.id));
+  if (!input) return res.status(404).json({ error: 'QUOTE_NOT_FOUND' });
+  const bytes = await generateDocumentPdf(input);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="quote-${input.number}.pdf"`);
+  res.send(Buffer.from(bytes));
+}));
 
 router.post('/quotes', requireRole('owner','admin','manager','staff'), validateBody(z.object({
   customer_id: z.string().uuid(),
@@ -627,10 +758,25 @@ router.patch('/quotes/:id/send', requireRole('owner','admin','manager','staff'),
   let delivery: 'sent' | 'not_configured' | 'no_customer_email' = 'not_configured';
   if (emailConfigured()) {
     if (customer?.email) {
+      // Attaching the branded PDF is best-effort alongside the secure link:
+      // if PDF generation fails for any reason, the email still goes out
+      // with the link, since that link is the delivery path the customer
+      // actually needs.
+      let pdfAttachment: { filename: string; content: string }[] | undefined;
+      try {
+        const pdfInput = await buildDocumentPdfInput(db, req.workspaceId!, 'quote', quote.id);
+        if (pdfInput) {
+          const bytes = await generateDocumentPdf(pdfInput);
+          pdfAttachment = [{ filename: `quote-${quote.quote_number}.pdf`, content: Buffer.from(bytes).toString('base64') }];
+        }
+      } catch (pdfErr) {
+        console.error(JSON.stringify({ level: 'error', workspaceId: req.workspaceId, quoteId: quote.id, message: 'Quote PDF attachment generation failed', error: String((pdfErr as Error)?.message || pdfErr).slice(0, 200) }));
+      }
       const result = await sendEmail({
         to: customer.email,
         subject: `Your quote #${quote.quote_number}`,
-        text: `Hi ${customer?.display_name || 'there'},\n\nYour quote is ready to review here:\n${shareUrl}\n\nThe link shows the full price breakdown including GST. Reply to this email or call us with any questions.`,
+        text: `Hi ${customer?.display_name || 'there'},\n\nYour quote is ready to review here:\n${shareUrl}\n\nThe link shows the full price breakdown including GST. A PDF copy is attached for your records. Reply to this email or call us with any questions.`,
+        attachments: pdfAttachment,
       });
       if (!result.delivered) {
         return res.status(502).json({ error: 'EMAIL_SEND_FAILED', message: 'The quote was not sent and stays in draft. Retry once email delivery works.' });
@@ -731,6 +877,17 @@ router.get('/invoices', asyncRoute(async (req: AuthenticatedRequest, res) => {
   res.json({ invoices: page, nextCursor, hasMore });
 }));
 
+// Branded PDF download — same read access as the list route above.
+router.get('/invoices/:id/pdf', asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const input = await buildDocumentPdfInput(db, req.workspaceId!, 'invoice', String(req.params.id));
+  if (!input) return res.status(404).json({ error: 'INVOICE_NOT_FOUND' });
+  const bytes = await generateDocumentPdf(input);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="invoice-${input.number}.pdf"`);
+  res.send(Buffer.from(bytes));
+}));
+
 // Shared invoice payment-session builder. The email send and the manual
 // checkout link must resolve to the SAME Stripe session for a given invoice
 // balance (deterministic idempotency key), so a customer can never hold two
@@ -808,10 +965,24 @@ router.patch('/invoices/:id/send', requireRole('owner','admin','manager','staff'
   let delivery: 'sent' | 'not_configured' | 'no_customer_email' = 'not_configured';
   if (customerEmail && emailConfigured()) {
     const dueText = invoice.due_at ? ` Payment is due by ${new Date(invoice.due_at).toLocaleDateString('en-AU')}.` : '';
+    // Attaching the branded PDF is best-effort alongside the secure payment
+    // link: a PDF generation failure must never block the email that carries
+    // the link the customer actually needs to pay.
+    let pdfAttachment: { filename: string; content: string }[] | undefined;
+    try {
+      const pdfInput = await buildDocumentPdfInput(db, req.workspaceId!, 'invoice', invoice.id);
+      if (pdfInput) {
+        const bytes = await generateDocumentPdf(pdfInput);
+        pdfAttachment = [{ filename: `invoice-${invoice.invoice_number}.pdf`, content: Buffer.from(bytes).toString('base64') }];
+      }
+    } catch (pdfErr) {
+      console.error(JSON.stringify({ level: 'error', workspaceId: req.workspaceId, invoiceId: invoice.id, message: 'Invoice PDF attachment generation failed', error: String((pdfErr as Error)?.message || pdfErr).slice(0, 200) }));
+    }
     const result = await sendEmail({
       to: customerEmail,
       subject: `Invoice #${invoice.invoice_number}`,
-      text: `Hi ${customer?.display_name || 'there'},\n\nInvoice #${invoice.invoice_number} for $${(Number(invoice.total_cents) / 100).toFixed(2)} is ready.${dueText}${paymentUrl ? `\n\nPay securely online here:\n${paymentUrl}` : ''}\n\nThank you for your business.`,
+      text: `Hi ${customer?.display_name || 'there'},\n\nInvoice #${invoice.invoice_number} for $${(Number(invoice.total_cents) / 100).toFixed(2)} is ready.${dueText}${paymentUrl ? `\n\nPay securely online here:\n${paymentUrl}` : ''}\n\nA PDF copy is attached for your records.\n\nThank you for your business.`,
+      attachments: pdfAttachment,
     });
     if (!result.delivered) {
       return res.status(502).json({ error: 'EMAIL_SEND_FAILED', message: 'The invoice was not sent and stays in draft. Retry once email delivery works.' });

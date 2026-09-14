@@ -4,7 +4,7 @@ import {
   CircleDollarSign, ClipboardList, ContactRound, CreditCard, FileCheck2, FileText, Globe,
   Home, Inbox, LibraryBig, MapPin, MessageSquareMore, Package, Phone,
   PhoneCall, PlugZap, ReceiptText, Repeat, Settings, ShieldAlert, ShieldCheck, Sparkles, Star,
-  UserRoundPlus, Users, Voicemail, Workflow,
+  Truck, UserRoundPlus, Users, Voicemail, Workflow,
 } from 'lucide-react';
 import {
   AnalyticsPage, ApprovalsPage, AutomationsPage, BillingPage, BusinessProfileSettingsPage, CapabilityMapPage, CommandCentrePage,
@@ -18,6 +18,7 @@ import { HiringPage } from '../pages/HiringPage';
 import { IntegrationsPage } from '../pages/IntegrationsPage';
 import { CustomerDetailPage, JobDetailPage } from '../pages/OperationalDetailPages';
 import { RecurringJobsPage, TimeMaterialsLogPage } from '../pages/FieldOpsPages';
+import { PurchasingPage } from '../pages/PurchasingPage';
 import { SchedulePage } from '../pages/SchedulePage';
 
 export type NavItem = [string, string, React.ComponentType<{ className?: string }>, boolean?];
@@ -45,14 +46,13 @@ export const workspaceNavGroups: NavGroup[] = [
     ['/app/quotes','Quotes',FileText],
     ['/app/invoices','Invoices',ReceiptText],
     ['/app/payments','Payments',CircleDollarSign],
-    ['/app/coming-soon/pdf-documents','PDF documents',FileText,true],
   ]},
   { label:'Field Operations', items:[
     ['/app/time-materials','Time & Materials log',Clock3],
     ['/app/coming-soon/checklists-forms','Checklists & forms',ClipboardList,true],
     ['/app/assets','Assets & service history',Package],
     ['/app/recurring-jobs','Recurring jobs & agreements',Repeat],
-    ['/app/coming-soon/supplier-purchasing','Supplier purchasing',Package,true],
+    ['/app/purchasing','Supplier purchasing',Truck],
   ]},
   { label:'AI Admin', items:[
     ['/app/operator/phone','AI Receptionist',Phone],
@@ -61,7 +61,6 @@ export const workspaceNavGroups: NavGroup[] = [
     ['/app/brain','Business Brain',Brain],
     ['/app/knowledge','Knowledge',LibraryBig],
     ['/app/operator','Operator log',Bot],
-    ['/app/coming-soon/ai-recaps','AI post-work recaps',Sparkles,true],
     ['/app/coming-soon/voicemail','Voicemail transcription',Voicemail,true],
     ['/app/coming-soon/call-recordings','Call recordings',PhoneCall,true],
     ['/app/coming-soon/spam-screening','Spam & robocall screening',ShieldAlert,true],
@@ -71,7 +70,6 @@ export const workspaceNavGroups: NavGroup[] = [
     ['/app/marketing','Marketing SMS',MessageSquareMore],
     ['/app/reviews','Reviews',Star],
     ['/app/coming-soon/customer-portal','Customer portal',Globe,true],
-    ['/app/coming-soon/review-automation','Automated review requests',Star,true],
   ]},
   { label:'Hiring', items:[['/app/hiring','Hiring',UserRoundPlus]] },
   { label:'Reports', items:[['/app/analytics','Reports & attribution',BarChart3]] },
@@ -126,6 +124,7 @@ export function routeWorkspacePage(path: string) {
   if (path === '/app/assets') return <AssetsPage/>;
   if (path === '/app/time-materials') return <TimeMaterialsLogPage/>;
   if (path === '/app/recurring-jobs') return <RecurringJobsPage/>;
+  if (path === '/app/purchasing') return <PurchasingPage/>;
   if (path === '/app/capabilities') return <CapabilityMapPage/>;
   if (path === '/app/marketing') return <MarketingPage/>;
   if (path === '/app/hiring') return <HiringPage/>;
