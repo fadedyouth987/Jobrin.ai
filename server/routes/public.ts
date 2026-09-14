@@ -214,26 +214,37 @@ router.get('/book/:slug', asyncRoute(async (req, res) => {
 router.post('/book/:slug', asyncRoute(async (req, res) => {
   const slug = String(req.params.slug || '').toLowerCase();
   if (!/^[a-z0-9-]{3,63}$/.test(slug)) return res.status(404).json({ error: 'BUSINESS_NOT_FOUND' });
-  const parsed = z.object({
+  // A peek request only checks available times: no customer details or chosen
+  // slot exist yet, so it needs only the service being browsed. A real
+  // booking-creation request needs the full customer + slot payload. Which
+  // schema applies is decided by the raw `peek` flag before validation, so a
+  // peek request is never rejected for missing name/phone/slot_start.
+  const isPeek = (req.body as { peek?: unknown } | undefined)?.peek === true;
+  const peekSchema = z.object({
+    peek: z.literal(true),
+    service_id: z.string().uuid(),
+  });
+  const bookSchema = z.object({
     service_id: z.string().uuid(),
     customer_name: z.string().trim().min(2).max(160),
     phone: z.string().trim().min(8).max(40),
     email: z.string().trim().email().max(254).nullable().optional(),
     address_text: z.string().trim().max(500).nullable().optional(),
-    slot_start: z.string().datetime().optional(),
-    peek: z.boolean().optional(),
-  }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: 'VALIDATION_FAILED' });
-  const input = parsed.data;
+    slot_start: z.string().datetime(),
+  });
+  const parseResult = isPeek
+    ? peekSchema.safeParse(req.body)
+    : bookSchema.safeParse(req.body);
+  if (!parseResult.success) return res.status(400).json({ error: 'VALIDATION_FAILED' });
+  // `parseResult.data` is one of two disjoint shapes depending on `isPeek`;
+  // cast to the shared field used before branching, then to the full
+  // booking shape once we know we are past the peek branch below.
+  const input = parseResult.data as { service_id: string };
 
   const { data: workspace } = await supabaseAdmin.from('workspaces').select('id,name,slug').eq('slug', slug).maybeSingle();
   if (!workspace) return res.status(404).json({ error: 'BUSINESS_NOT_FOUND' });
   const { data: service } = await supabaseAdmin.from('services').select('id,name,default_duration_minutes,booking_type,requires_deposit,deposit_cents').eq('workspace_id', workspace.id).eq('id', input.service_id).maybeSingle();
   if (!service || service.booking_type !== 'bookable') return res.status(404).json({ error: 'SERVICE_NOT_FOUND' });
-
-  const slotStart = new Date(input.slot_start);
-  const slotEnd = new Date(slotStart.getTime() + Number(service.default_duration_minutes || 60) * 60_000);
-  if (Number.isNaN(slotStart.getTime())) return res.status(400).json({ error: 'INVALID_SLOT' });
 
   const [rulesResult, busyAppointments, busyJobs] = await Promise.all([
     supabaseAdmin.from('business_hours').select('weekday,opens_at,closes_at,closed').eq('workspace_id', workspace.id).in('schedule_type', ['booking', 'business']),
@@ -245,45 +256,57 @@ router.post('/book/:slug', asyncRoute(async (req, res) => {
     ...(busyJobs.data ?? []).filter((row: any) => row.scheduled_end).map((row: any) => ({ start: row.scheduled_start, end: row.scheduled_end })),
   ];
   const offered = generateBookingSlots((rulesResult.data ?? []) as BusinessHourRule[], Number(service.default_duration_minutes || 60), new Date(), busyRanges);
-  if (input.peek || !input.slot_start) return res.json({ slots: offered });
+  if (isPeek) return res.json({ slots: offered });
+
+  // From here on this is a real booking-creation request: `input` was parsed
+  // against bookSchema above, so the customer/slot fields are all present.
+  const bookingInput = parseResult.data as { service_id: string; customer_name: string; phone: string; email?: string | null; address_text?: string | null; slot_start: string };
+  const slotStart = new Date(bookingInput.slot_start);
+  const slotEnd = new Date(slotStart.getTime() + Number(service.default_duration_minutes || 60) * 60_000);
+  if (Number.isNaN(slotStart.getTime())) return res.status(400).json({ error: 'INVALID_SLOT' });
   if (!offered.some((slot) => slot.start === slotStart.toISOString())) {
     return res.status(409).json({ error: 'SLOT_TAKEN', message: 'That time was just booked. Please choose another time.' });
   }
 
-  const phone = normalizeE164(input.phone);
+  const phone = normalizeE164(bookingInput.phone);
   if (!/^\+[1-9]\d{7,14}$/.test(phone)) return res.status(400).json({ error: 'VALIDATION_FAILED' });
-  let customerId: string | null = null;
-  const { data: existing } = await supabaseAdmin.from('customers').select('id').eq('workspace_id', workspace.id).eq('normalized_phone', phone).is('deleted_at', null).maybeSingle();
-  customerId = existing?.id ?? null;
-  if (!customerId) {
-    const created = await supabaseAdmin.from('customers').insert({
-      workspace_id: workspace.id, display_name: input.customer_name, phone, normalized_phone: phone,
-      email: input.email || null, source: 'public_booking',
-    }).select('id').single();
-    customerId = created.data?.id ?? null;
+
+  // Deterministic idempotency key: a client retry of the exact same booking
+  // (same workspace, phone and slot) after e.g. a network timeout replays the
+  // original booking instead of creating a duplicate appointment/job pair.
+  const idempotencyKey = crypto.createHash('sha256')
+    .update(`${workspace.id}:${phone}:${slotStart.toISOString()}:${slotEnd.toISOString()}`, 'utf8')
+    .digest('hex');
+
+  const { data: bookingResult, error: bookingError } = await supabaseAdmin.rpc('create_public_booking', {
+    target_workspace: workspace.id,
+    target_service: service.id,
+    target_service_name: service.name,
+    target_customer_name: bookingInput.customer_name,
+    target_phone: phone,
+    target_normalized_phone: phone,
+    target_email: bookingInput.email || null,
+    target_address_text: bookingInput.address_text || null,
+    target_starts_at: slotStart.toISOString(),
+    target_ends_at: slotEnd.toISOString(),
+    target_booking_key: idempotencyKey,
+  });
+  if (bookingError) {
+    if (/SLOT_TAKEN/.test(bookingError.message || '')) {
+      return res.status(409).json({ error: 'SLOT_TAKEN', message: 'That time was just booked. Please choose another time.' });
+    }
+    return res.status(500).json({ error: 'BOOKING_CREATE_FAILED' });
   }
 
-  const [appointment, job] = await Promise.all([
-    supabaseAdmin.from('appointments').insert({
-      workspace_id: workspace.id, customer_id: customerId, title: service.name,
-      starts_at: slotStart.toISOString(), ends_at: slotEnd.toISOString(),
-      address_text: input.address_text || null, status: 'scheduled', source: 'public_booking',
-    }).select('id').single(),
-    supabaseAdmin.from('jobs').insert({
-      workspace_id: workspace.id, customer_id: customerId, title: service.name,
-      address_text: input.address_text || null, scheduled_start: slotStart.toISOString(), scheduled_end: slotEnd.toISOString(), status: 'new',
-    }).select('id').single(),
-  ]);
-  if (appointment.error || job.error) return res.status(500).json({ error: 'BOOKING_CREATE_FAILED' });
   await supabaseAdmin.from('audit_logs').insert({
-    workspace_id: workspace.id, action: 'booking.public_created', entity_type: 'appointment', entity_id: appointment.data?.id ?? null,
+    workspace_id: workspace.id, action: 'booking.public_created', entity_type: 'appointment', entity_id: bookingResult?.appointment_id ?? null,
     details: { via: 'public_booking', service: service.name }, ip_address: req.ip,
   });
   try {
     await supabaseAdmin.from('notifications').insert({
       workspace_id: workspace.id, type: 'booking.created',
-      title: 'New online booking', body: `${input.customer_name} booked ${service.name} at ${slotStart.toLocaleString('en-AU', { timeZone: 'Australia/Adelaide', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.`,
-      resource_type: 'appointment', resource_id: appointment.data?.id ?? null,
+      title: 'New online booking', body: `${bookingInput.customer_name} booked ${service.name} at ${slotStart.toLocaleString('en-AU', { timeZone: 'Australia/Adelaide', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.`,
+      resource_type: 'appointment', resource_id: bookingResult?.appointment_id ?? null,
     });
   } catch { /* best-effort */ }
 
