@@ -44,6 +44,41 @@ test('booking slots respect business hours, duration and exclusions', () => {
   }
 });
 
+test('generateBookingSlots produces different slot instants for a non-Adelaide timezone with the same business hours', () => {
+  // Same local business hours (9am-5pm) in two different timezones must
+  // produce different UTC instants — proving the timeZone argument is
+  // actually load-bearing, not ignored.
+  const now = new Date();
+  const anchor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  anchor.setUTCDate(anchor.getUTCDate() + (((7 - anchor.getUTCDay()) % 7) || 7));
+  const rules = [weekday(1), weekday(2), weekday(3), weekday(4), weekday(5), closed(0), closed(6)];
+  const adelaideSlots = generateBookingSlots(rules, 60, anchor, [], 'Australia/Adelaide', 3);
+  const perthSlots = generateBookingSlots(rules, 60, anchor, [], 'Australia/Perth', 3);
+  assert.ok(adelaideSlots.length > 0);
+  assert.ok(perthSlots.length > 0);
+  // Perth (UTC+8) is at least 1.5 hours behind Adelaide (UTC+9:30 or +10:30
+  // ACDT); the same local 9am slot must land on a different UTC instant.
+  assert.notEqual(adelaideSlots[0].start, perthSlots[0].start);
+});
+
+test('the workspace-configured timezone is threaded through booking slot generation instead of a hardcoded default', () => {
+  const publicSource = source('server/routes/public.ts');
+  // POST /book/:slug must read the workspace's own business_profiles.timezone
+  // (falling back to Adelaide only when unset) rather than relying on
+  // generateBookingSlots' hardcoded default.
+  assert.match(publicSource, /business_profiles'\)\.select\('timezone'\)\.eq\('workspace_id', workspace\.id\)/);
+  assert.match(publicSource, /const timeZone = profileResult\.data\?\.timezone \|\| 'Australia\/Adelaide';/);
+  assert.match(publicSource, /generateBookingSlots\(\(rulesResult\.data \?\? \[\]\) as BusinessHourRule\[\], Number\(service\.default_duration_minutes \|\| 60\), new Date\(\), busyRanges, timeZone\)/);
+
+  const runnerSource = source('server/automation/runner.ts');
+  // The availability.check automation executor must do the same — no
+  // hardcoded 'Australia/Adelaide' literal passed to generateBookingSlots.
+  assert.match(runnerSource, /business_profiles'\)\.select\('timezone'\)\.eq\('workspace_id', workspaceId\)/);
+  assert.match(runnerSource, /const timeZone = profileResult\.data\?\.timezone \|\| 'Australia\/Adelaide';/);
+  assert.doesNotMatch(runnerSource, /generateBookingSlots\([^)]*'Australia\/Adelaide'/);
+  assert.match(runnerSource, /generateBookingSlots\(\(rulesResult\.data \?\? \[\]\) as BusinessHourRule\[\], durationMinutes, from, busyRanges, timeZone, days\)/);
+});
+
 test('booking endpoints are public, rate limited and validate input', () => {
   const publicSource = source('server/routes/public.ts');
   assert.match(publicSource, /router\.get\('\/book\/:slug'/);

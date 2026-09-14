@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { ADMIN_MODES, JOBRIN_ADMIN_SCOPE, buildSystemPrompt, issueCallToken, verifyCallToken, ReceptionistSession, DEFAULT_APPROVED_PRICING_LANGUAGE, DEFAULT_CALLBACK_WINDOW, type CallContext } from '../server/ai/receptionistCall';
+import { ADMIN_MODES, JOBRIN_ADMIN_SCOPE, buildSystemPrompt, issueCallToken, verifyCallToken, ReceptionistSession, DEFAULT_APPROVED_PRICING_LANGUAGE, DEFAULT_CALLBACK_WINDOW, DEFAULT_MAX_CONCURRENT_CALLS, DEFAULT_MAX_CALLS_PER_CALLER_HOUR, isOverConcurrentCallLimit, isOverCallerHourlyLimit, type CallContext } from '../server/ai/receptionistCall';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const source = (relative: string) => readFileSync(join(here, '..', relative), 'utf8');
@@ -181,6 +181,54 @@ test('a call ends once it hits the configured minute limit', async () => {
   const result = await session.handleUserText('Are you still there?');
   assert.equal(result.endCall, true);
   assert.match(result.reply, /wrap up this call/i);
+});
+
+test('the concurrent-call limit rejects the Nth call once the workspace is at capacity', () => {
+  // Owner set max_concurrent_calls = 3: the 3rd already-in-progress call means
+  // a 4th (the N+1th) inbound call must be rejected.
+  assert.equal(isOverConcurrentCallLimit(0, 3), false);
+  assert.equal(isOverConcurrentCallLimit(2, 3), false);
+  assert.equal(isOverConcurrentCallLimit(3, 3), true);
+  assert.equal(isOverConcurrentCallLimit(4, 3), true);
+  // No owner-configured limit falls back to a sane default rather than
+  // accepting unlimited concurrent calls.
+  assert.equal(isOverConcurrentCallLimit(DEFAULT_MAX_CONCURRENT_CALLS - 1, null), false);
+  assert.equal(isOverConcurrentCallLimit(DEFAULT_MAX_CONCURRENT_CALLS, null), true);
+  assert.equal(isOverConcurrentCallLimit(DEFAULT_MAX_CONCURRENT_CALLS, undefined), true);
+});
+
+test('the per-caller hourly limit rejects the Nth call from the same number within the hour', () => {
+  // Owner set max_calls_per_caller_hour = 2: a 3rd call from the same number
+  // inside the trailing hour must be rejected.
+  assert.equal(isOverCallerHourlyLimit(0, 2), false);
+  assert.equal(isOverCallerHourlyLimit(1, 2), false);
+  assert.equal(isOverCallerHourlyLimit(2, 2), true);
+  assert.equal(isOverCallerHourlyLimit(3, 2), true);
+  assert.equal(isOverCallerHourlyLimit(DEFAULT_MAX_CALLS_PER_CALLER_HOUR - 1, null), false);
+  assert.equal(isOverCallerHourlyLimit(DEFAULT_MAX_CALLS_PER_CALLER_HOUR, null), true);
+});
+
+test('the /voice webhook counts in-progress and recent-caller calls and rejects fail-closed, but proceeds fail-open on a query error', () => {
+  const routeSource = source('server/routes/receptionist.ts');
+  // Concurrency: exact 'calls' status value used for an active call, scoped
+  // to this workspace.
+  assert.match(routeSource, /\.eq\('workspace_id', integration\.workspace_id\)\.eq\('status', 'in_progress'\)/);
+  // Per-caller hourly window: scoped to this workspace and this caller's
+  // number, over the trailing hour.
+  assert.match(routeSource, /\.eq\('workspace_id', integration\.workspace_id\)\.eq\('from_number', from\)/);
+  assert.match(routeSource, /\.gte\('created_at', new Date\(Date\.now\(\) - 60 \* 60_000\)\.toISOString\(\)\)/);
+  // Both pure decision functions from the engine are actually consulted
+  // before the call is connected, and a genuine breach responds with TwiML
+  // instead of connecting to ConversationRelay.
+  assert.match(routeSource, /isOverConcurrentCallLimit\(concurrentResult\.count/);
+  assert.match(routeSource, /isOverCallerHourlyLimit\(callerResult\.count/);
+  // The limit checks happen strictly before the call token is issued and the
+  // call is connected.
+  const limitCheckAt = routeSource.indexOf('isOverConcurrentCallLimit(');
+  const tokenAt = routeSource.indexOf('issueCallToken(');
+  assert.ok(limitCheckAt >= 0 && tokenAt >= 0 && limitCheckAt < tokenAt);
+  // A query error is caught and logged, not thrown — the call proceeds.
+  assert.match(routeSource, /catch \(error\) \{\s*\n\s*console\.error/);
 });
 
 test('model-assisted AI Admin work is metered idempotently and logged with provider usage', () => {

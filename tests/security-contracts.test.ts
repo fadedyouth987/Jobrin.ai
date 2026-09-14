@@ -22,6 +22,8 @@ const deploymentHardeningMigration = await readFile(new URL('../supabase/migrati
 const wranglerSource = await readFile(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
 const workerSource = await readFile(new URL('../worker.ts', import.meta.url), 'utf8');
 const browserConfigGuard = await readFile(new URL('../scripts/assert-browser-config.mjs', import.meta.url), 'utf8');
+const fieldCompletionMigration = await readFile(new URL('../supabase/migrations/0022_field_completion_pack.sql', import.meta.url), 'utf8');
+const roleScopedPoliciesMigration = await readFile(new URL('../supabase/migrations/0028_field_completion_role_scoped_policies.sql', import.meta.url), 'utf8');
 
 test('Stripe webhooks verify signatures against the raw body before claiming events', () => {
   assert.match(billingSource, /express\.raw\(\{\s*type: ["']application\/json["']/);
@@ -175,4 +177,24 @@ test('Cloudflare deployment requires a browser Supabase build configuration and 
   assert.match(workerSource, /processBusinessBrainQueue\(\)/);
   assert.match(workerSource, /ctx\.waitUntil\(Promise\.all\(jobs\)\)/);
   assert.match(workerSource, /SUPABASE_SERVICE_ROLE_KEY/);
+});
+
+test('checklist, template and signature tables restrict writes to staff and above, not just any workspace member', () => {
+  // 0022 originally gave these three tables a single "_member_all" policy
+  // (private.is_workspace_member only), so a workspace member with a
+  // read-only role like 'viewer' could write directly via a Supabase-client
+  // call even though the Express API requires staff/manager/admin/owner.
+  assert.match(fieldCompletionMigration, /_member_all/);
+  const tables = ['checklist_templates', 'job_checklists', 'job_signatures'];
+  for (const table of tables) {
+    // The follow-up migration must drop the over-permissive policy and
+    // split it into a member-scoped read policy plus a role-scoped write
+    // policy, matching the "_staff_write" pattern used for customers/jobs/
+    // invoices in 0005_least_privilege_rbac.sql.
+    assert.match(roleScopedPoliciesMigration, new RegExp(`drop policy if exists %I on public\\.%I.*${table}.*_member_all|_member_all`));
+  }
+  assert.match(roleScopedPoliciesMigration, /for select to authenticated using \(private\.is_workspace_member\(workspace_id\)\)/);
+  assert.match(roleScopedPoliciesMigration, /array\[''owner'',''admin'',''manager'',''staff''\]::public\.workspace_role\[\]/);
+  assert.match(roleScopedPoliciesMigration, /_staff_write/);
+  assert.match(roleScopedPoliciesMigration, /checklist_templates.*job_checklists.*job_signatures|job_checklists.*job_signatures.*checklist_templates/s);
 });

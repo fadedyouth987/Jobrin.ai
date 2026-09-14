@@ -171,6 +171,81 @@ test('event dispatch is wired from lead creation, job completion, and has an ava
   assert.match(operationsSource, /queueAutomationRun\(req\.workspaceId!, 'job\.completed'/);
 });
 
+test('job photo storage keys derive their extension from the validated mime_type, never the client file_name', () => {
+  const operationsSource = source('server/routes/operations.ts');
+  const routeAt = operationsSource.indexOf("router.post('/jobs/:id/photos'");
+  const routeBody = operationsSource.slice(routeAt, operationsSource.indexOf("router.get('/jobs/:id/photos'", routeAt));
+  // A crafted file_name like "x.xyz/../../../evil" must never reach the
+  // storage path — only the mime_type-derived extension may.
+  assert.doesNotMatch(routeBody, /file_name\.split\('\.'\)/);
+  assert.match(routeBody, /MIME_TYPE_EXTENSIONS\[req\.body\.mime_type\]/);
+  assert.match(operationsSource, /const MIME_TYPE_EXTENSIONS = \{[^}]*'image\/jpeg':\s*'jpg'[^}]*\}/);
+});
+
+test('quote send fails closed before marking sent, matching the invoice send route', () => {
+  const operationsSource = source('server/routes/operations.ts');
+  const routeAt = operationsSource.indexOf("router.patch('/quotes/:id/send'");
+  const routeBody = operationsSource.slice(routeAt, operationsSource.indexOf("router.post('/quotes/:id/link'", routeAt));
+  assert.match(routeBody, /EMAIL_SEND_FAILED/);
+  // The email attempt (and its failure return) must run before the status
+  // update to 'sent' — never after, or a failed send would still be marked sent.
+  const emailFailAt = routeBody.indexOf('EMAIL_SEND_FAILED');
+  const statusFlipAt = routeBody.indexOf("status: 'sent'");
+  assert.ok(emailFailAt >= 0);
+  assert.ok(statusFlipAt > emailFailAt);
+  // A customer with no email on file is still a deliberate manual-delivery
+  // path, not a failure — it still ends up marked sent.
+  assert.match(routeBody, /no_customer_email/);
+});
+
+test('quote-to-invoice conversion relies on a unique index instead of a check-then-act race', () => {
+  const operationsSource = source('server/routes/operations.ts');
+  const routeAt = operationsSource.indexOf("router.post('/quotes/:id/convert'");
+  const routeBody = operationsSource.slice(routeAt, operationsSource.indexOf("router.get('/invoices'", routeAt));
+  assert.match(routeBody, /23505/);
+  assert.match(routeBody, /QUOTE_ALREADY_INVOICED/);
+  // No separate select-then-insert lookup ahead of the insert attempt.
+  assert.doesNotMatch(routeBody.slice(0, routeBody.indexOf('.insert({')), /neq\('status', 'void'\)\.limit\(1\)/);
+  const migrationSource = source('supabase/migrations/0029_invoices_quote_id_unique_active.sql');
+  assert.match(migrationSource, /create unique index if not exists invoices_quote_id_active_idx/);
+  assert.match(migrationSource, /where quote_id is not null and status != 'void'/);
+});
+
+test('service agreement job generation compare-and-swaps next_service_at before inserting the job', () => {
+  const operationsSource = source('server/routes/operations.ts');
+  const routeAt = operationsSource.indexOf("router.post('/service-agreements/:id/generate'");
+  const routeBody = operationsSource.slice(routeAt, operationsSource.indexOf('// ---------- Field Completion Pack', routeAt));
+  assert.match(routeBody, /eq\('next_service_at', originalNextServiceAt\)/);
+  assert.match(routeBody, /AGREEMENT_ALREADY_GENERATED/);
+  // The CAS update must happen before the job insert, so a losing request
+  // never creates a duplicate job for the same cycle.
+  const casAt = routeBody.indexOf("eq('next_service_at', originalNextServiceAt)");
+  const jobInsertAt = routeBody.indexOf(".from('jobs').insert({");
+  assert.ok(casAt >= 0);
+  assert.ok(jobInsertAt > casAt);
+});
+
+test('a claimed automation run is re-checked against the workspace entitlement before any step executes', () => {
+  // Entitlement is checked when a run is queued (queueAutomationRun) and when
+  // a manual run is requested (requireActiveSubscription('ai.basic') in
+  // server/routes/intelligence.ts) — but a run can sit in 'waiting' for an
+  // arbitrarily long time on approval, and the workspace can downgrade or
+  // lapse in the meantime. processAutomationRuns must re-check the same
+  // entitlement right after claiming a run and before executing any step.
+  const runnerSource = source('server/automation/runner.ts');
+  const claimAt = runnerSource.indexOf("status: 'running'");
+  const entitlementQueryAt = runnerSource.indexOf("eq('workspace_id', run.workspace_id).eq('feature_key', 'ai.basic')");
+  const executeAt = runnerSource.indexOf('executeAutomaticStep(run.workspace_id, step)');
+  assert.ok(claimAt >= 0, 'expected the run to be claimed via status: running');
+  assert.ok(entitlementQueryAt >= 0, 'expected a subscription_entitlements re-check keyed on run.workspace_id');
+  assert.ok(executeAt >= 0, 'expected the executeAutomaticStep call site');
+  assert.ok(claimAt < entitlementQueryAt, 'entitlement must be re-checked after the run is claimed');
+  assert.ok(entitlementQueryAt < executeAt, 'entitlement must be re-checked before any step executes');
+  // A revoked/disabled entitlement must cancel the run with a clear reason,
+  // not silently execute it.
+  assert.match(runnerSource, /if \(!entitlement\?\.enabled\) \{\s*\n\s*await supabaseAdmin\.from\('automation_runs'\)\.update\(\{ status: 'cancelled', completed_at: new Date\(\)\.toISOString\(\), last_error: 'ENTITLEMENT_REVOKED' \}\)/);
+});
+
 test('approving an automation-step approval requeues its run; rejecting cancels it', () => {
   const intelligenceSource = source('server/routes/intelligence.ts');
   const decisionRouteAt = intelligenceSource.indexOf("router.post('/approvals/:id/decision'");

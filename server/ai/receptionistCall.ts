@@ -145,6 +145,22 @@ export const DEFAULT_APPROVED_PRICING_LANGUAGE = 'A team member will confirm pri
 export const DEFAULT_CALLBACK_WINDOW = 'within one business day';
 export const DEFAULT_MAX_CALL_MINUTES = 15;
 export const DEFAULT_MAX_CALL_TURNS = 40;
+export const DEFAULT_MAX_CONCURRENT_CALLS = 5;
+export const DEFAULT_MAX_CALLS_PER_CALLER_HOUR = 6;
+
+// Abuse/spend guardrails enforced by the /voice webhook before a call is ever
+// connected to the AI engine (issueCallToken + ConversationRelay). Pure
+// decision functions so the counting/query logic in the webhook stays
+// unit-testable without a live database.
+export function isOverConcurrentCallLimit(currentInProgressCalls: number, maxConcurrentCalls?: number | null): boolean {
+  const max = maxConcurrentCalls ?? DEFAULT_MAX_CONCURRENT_CALLS;
+  return currentInProgressCalls >= max;
+}
+
+export function isOverCallerHourlyLimit(callsFromCallerLastHour: number, maxCallsPerCallerHour?: number | null): boolean {
+  const max = maxCallsPerCallerHour ?? DEFAULT_MAX_CALLS_PER_CALLER_HOUR;
+  return callsFromCallerLastHour >= max;
+}
 
 export type CallContext = {
   workspaceId: string;

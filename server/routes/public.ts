@@ -199,7 +199,7 @@ router.get('/book/:slug', asyncRoute(async (req, res) => {
   const { data: workspace } = await supabaseAdmin.from('workspaces').select('id,name,slug').eq('slug', slug).maybeSingle();
   if (!workspace) return res.status(404).json({ error: 'BUSINESS_NOT_FOUND' });
   const [profileResult, servicesResult, rulesResult] = await Promise.all([
-    supabaseAdmin.from('business_profiles').select('trading_name,phone,suburb,state').eq('workspace_id', workspace.id).maybeSingle(),
+    supabaseAdmin.from('business_profiles').select('trading_name,phone,suburb,state,timezone').eq('workspace_id', workspace.id).maybeSingle(),
     supabaseAdmin.from('services').select('id,name,description,default_duration_minutes,requires_deposit,deposit_cents').eq('workspace_id', workspace.id).eq('booking_type', 'bookable').order('name'),
     supabaseAdmin.from('business_hours').select('weekday,opens_at,closes_at,closed').eq('workspace_id', workspace.id).in('schedule_type', ['booking', 'business']),
   ]);
@@ -246,16 +246,18 @@ router.post('/book/:slug', asyncRoute(async (req, res) => {
   const { data: service } = await supabaseAdmin.from('services').select('id,name,default_duration_minutes,booking_type,requires_deposit,deposit_cents').eq('workspace_id', workspace.id).eq('id', input.service_id).maybeSingle();
   if (!service || service.booking_type !== 'bookable') return res.status(404).json({ error: 'SERVICE_NOT_FOUND' });
 
-  const [rulesResult, busyAppointments, busyJobs] = await Promise.all([
+  const [profileResult, rulesResult, busyAppointments, busyJobs] = await Promise.all([
+    supabaseAdmin.from('business_profiles').select('timezone').eq('workspace_id', workspace.id).maybeSingle(),
     supabaseAdmin.from('business_hours').select('weekday,opens_at,closes_at,closed').eq('workspace_id', workspace.id).in('schedule_type', ['booking', 'business']),
     supabaseAdmin.from('appointments').select('starts_at,ends_at').eq('workspace_id', workspace.id).in('status', ['hold', 'scheduled', 'confirmed']).gte('starts_at', new Date(Date.now() - 86_400_000).toISOString()),
     supabaseAdmin.from('jobs').select('scheduled_start,scheduled_end').eq('workspace_id', workspace.id).not('scheduled_start', 'is', null).in('status', ['new', 'scheduled', 'on_the_way', 'in_progress']),
   ]);
+  const timeZone = profileResult.data?.timezone || 'Australia/Adelaide';
   const busyRanges = [
     ...(busyAppointments.data ?? []).map((row: any) => ({ start: row.starts_at, end: row.ends_at })),
     ...(busyJobs.data ?? []).filter((row: any) => row.scheduled_end).map((row: any) => ({ start: row.scheduled_start, end: row.scheduled_end })),
   ];
-  const offered = generateBookingSlots((rulesResult.data ?? []) as BusinessHourRule[], Number(service.default_duration_minutes || 60), new Date(), busyRanges);
+  const offered = generateBookingSlots((rulesResult.data ?? []) as BusinessHourRule[], Number(service.default_duration_minutes || 60), new Date(), busyRanges, timeZone);
   if (isPeek) return res.json({ slots: offered });
 
   // From here on this is a real booking-creation request: `input` was parsed
@@ -305,7 +307,7 @@ router.post('/book/:slug', asyncRoute(async (req, res) => {
   try {
     await supabaseAdmin.from('notifications').insert({
       workspace_id: workspace.id, type: 'booking.created',
-      title: 'New online booking', body: `${bookingInput.customer_name} booked ${service.name} at ${slotStart.toLocaleString('en-AU', { timeZone: 'Australia/Adelaide', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.`,
+      title: 'New online booking', body: `${bookingInput.customer_name} booked ${service.name} at ${slotStart.toLocaleString('en-AU', { timeZone, day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.`,
       resource_type: 'appointment', resource_id: bookingResult?.appointment_id ?? null,
     });
   } catch { /* best-effort */ }

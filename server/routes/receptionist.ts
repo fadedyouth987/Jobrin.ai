@@ -2,7 +2,7 @@ import { Router } from 'express';
 import twilio from 'twilio';
 import { z } from 'zod';
 import { env } from '../env';
-import { issueCallToken, isReceptionistEngineAttached, simulateAdminTurn } from '../ai/receptionistCall';
+import { issueCallToken, isReceptionistEngineAttached, isOverCallerHourlyLimit, isOverConcurrentCallLimit, simulateAdminTurn } from '../ai/receptionistCall';
 import { evaluateGoLiveChecklist } from '../ai/receptionistReadiness';
 import { normalizeE164, twilioConfigured } from '../providers/twilio';
 import { openaiConfigured } from '../providers/openai';
@@ -183,6 +183,32 @@ webhookRouter.post('/voice', twilioSignatureGuard('/api/twilio/voice'), asyncRou
   if (profile.recording_enabled) {
     response.say({ language: profile.language || 'en-AU' }, 'The virtual receptionist is temporarily unavailable. Please call again later.');
     return res.type('text/xml').send(response.toString());
+  }
+  // Owner-configured abuse/spend guardrails: cap concurrent calls per
+  // workspace and calls per caller per hour before the call is ever connected
+  // to the AI engine. Fail OPEN on a query error (log and proceed — a
+  // transient DB hiccup must never block every inbound call) but fail CLOSED
+  // (reject) once the configured limits are genuinely exceeded.
+  try {
+    const [concurrentResult, callerResult] = await Promise.all([
+      supabaseAdmin.from('calls').select('id', { count: 'exact', head: true })
+        .eq('workspace_id', integration.workspace_id).eq('status', 'in_progress'),
+      supabaseAdmin.from('calls').select('id', { count: 'exact', head: true })
+        .eq('workspace_id', integration.workspace_id).eq('from_number', from)
+        .gte('created_at', new Date(Date.now() - 60 * 60_000).toISOString()),
+    ]);
+    if (concurrentResult.error) throw concurrentResult.error;
+    if (isOverConcurrentCallLimit(concurrentResult.count ?? 0, profile.max_concurrent_calls)) {
+      response.say({ language: profile.language || 'en-AU' }, "We're at capacity right now. Please try again shortly, or call back and leave a message for the team.");
+      return res.type('text/xml').send(response.toString());
+    }
+    if (callerResult.error) throw callerResult.error;
+    if (isOverCallerHourlyLimit(callerResult.count ?? 0, profile.max_calls_per_caller_hour)) {
+      response.say({ language: profile.language || 'en-AU' }, "We've reached the call limit for this number for now. Please try again shortly.");
+      return res.type('text/xml').send(response.toString());
+    }
+  } catch (error) {
+    console.error(JSON.stringify({ level: 'error', component: 'receptionist_voice', message: 'Call limit check failed; proceeding with call', error: String((error as Error)?.message || error).slice(0, 200) }));
   }
   await supabaseAdmin.from('calls').upsert({ workspace_id: integration.workspace_id, provider: 'twilio', provider_call_id: callSid, direction: 'inbound', from_number: from, to_number: to, status: 'in_progress', answered_by: 'ai_receptionist', started_at: new Date().toISOString(), recording_status: profile.recording_enabled ? 'pending_consent' : 'off' }, { onConflict: 'workspace_id,provider,provider_call_id' });
   const callToken = issueCallToken(integration.workspace_id, callSid, to);

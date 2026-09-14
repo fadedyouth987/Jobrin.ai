@@ -104,18 +104,21 @@ async function executeAutomaticStep(workspaceId: string, step: { tool: string; i
       }
       // Reuses the same slot-generation logic and busy-range sources as public
       // booking availability (server/routes/public.ts) so an automation's view
-      // of "free" matches what a customer is offered.
-      const [rulesResult, busyAppointments, busyJobs] = await Promise.all([
+      // of "free" matches what a customer is offered — including the
+      // workspace's own configured timezone rather than a hardcoded default.
+      const [profileResult, rulesResult, busyAppointments, busyJobs] = await Promise.all([
+        supabaseAdmin.from('business_profiles').select('timezone').eq('workspace_id', workspaceId).maybeSingle(),
         supabaseAdmin.from('business_hours').select('weekday,opens_at,closes_at,closed').eq('workspace_id', workspaceId).in('schedule_type', ['booking', 'business']),
         supabaseAdmin.from('appointments').select('starts_at,ends_at').eq('workspace_id', workspaceId).in('status', ['hold', 'scheduled', 'confirmed']).gte('starts_at', new Date(Date.now() - 86_400_000).toISOString()),
         supabaseAdmin.from('jobs').select('scheduled_start,scheduled_end').eq('workspace_id', workspaceId).not('scheduled_start', 'is', null).in('status', ['new', 'scheduled', 'on_the_way', 'in_progress']),
       ]);
+      const timeZone = profileResult.data?.timezone || 'Australia/Adelaide';
       const busyRanges = [
         ...(busyAppointments.data ?? []).map((row: any) => ({ start: row.starts_at, end: row.ends_at })),
         ...(busyJobs.data ?? []).filter((row: any) => row.scheduled_end).map((row: any) => ({ start: row.scheduled_start, end: row.scheduled_end })),
       ];
       const days = Math.max(1, Math.min(30, Math.ceil((to.getTime() - from.getTime()) / 86_400_000)));
-      const slots = generateBookingSlots((rulesResult.data ?? []) as BusinessHourRule[], durationMinutes, from, busyRanges, 'Australia/Adelaide', days)
+      const slots = generateBookingSlots((rulesResult.data ?? []) as BusinessHourRule[], durationMinutes, from, busyRanges, timeZone, days)
         .filter((slot) => new Date(slot.start) <= to);
       return { output: { slots } };
     }
@@ -276,6 +279,21 @@ export async function processAutomationRuns(limit = 5) {
         if (automationError || !automation) throw new Error('AUTOMATION_NOT_FOUND');
         if (automation.status !== 'active') {
           await supabaseAdmin.from('automation_runs').update({ status: 'cancelled', completed_at: new Date().toISOString(), last_error: 'AUTOMATION_NOT_ACTIVE' }).eq('id', run.id);
+          processed++;
+          continue;
+        }
+
+        // Entitlement is checked when a run is queued (queueAutomationRun) or
+        // manually requested (requireActiveSubscription('ai.basic') in
+        // server/routes/intelligence.ts) — but a run can sit in 'waiting' for
+        // an arbitrarily long time on approval, and the workspace's plan can
+        // change in the meantime. Re-check the same entitlement here, right
+        // before any step actually executes, so a downgraded/lapsed
+        // workspace's queued or approved work does not silently run anyway.
+        const { data: entitlement } = await supabaseAdmin.from('subscription_entitlements')
+          .select('enabled').eq('workspace_id', run.workspace_id).eq('feature_key', 'ai.basic').maybeSingle();
+        if (!entitlement?.enabled) {
+          await supabaseAdmin.from('automation_runs').update({ status: 'cancelled', completed_at: new Date().toISOString(), last_error: 'ENTITLEMENT_REVOKED' }).eq('id', run.id);
           processed++;
           continue;
         }
