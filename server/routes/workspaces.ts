@@ -1,11 +1,60 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncRoute, validateBody } from '../security';
-import { createUserClient, requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest, writeAudit } from '../supabase';
+import {
+  allowPendingWorkspaceDeletion,
+  createUserClient,
+  requireAuth,
+  requireRole,
+  requireSensitiveAuth,
+  requireWorkspace,
+  supabaseAdmin,
+  type AuthenticatedRequest,
+  writeAudit,
+} from '../supabase';
+import { env } from '../env';
 
 const router = Router();
 
 const slugify = (value: string) => value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63);
+
+// Soft-delete + scheduled hard-purge policy: a 30-day grace window between
+// the owner's request and the point the scheduled purge job
+// (server/automation/workspacePurge.ts) is allowed to hard-delete the
+// workspace. Kept as a named constant so the route, the purge job and the
+// tests all agree on the window.
+export const WORKSPACE_DELETION_GRACE_DAYS = 30;
+
+export function computeDeletionSchedule(now: Date = new Date()): { requestedAt: string; scheduledFor: string } {
+  return {
+    requestedAt: now.toISOString(),
+    scheduledFor: new Date(now.getTime() + WORKSPACE_DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+  };
+}
+
+// Background/system audit write: the request-account route below acts across
+// multiple workspaces the caller owns, so it cannot use writeAudit(req, ...)
+// (that helper is scoped to req.workspaceId). Mirrors writeAudit's own
+// fail-closed behaviour -- never write through anything but the service role,
+// and never throw into the caller's request.
+async function writeWorkspaceAudit(
+  workspaceId: string,
+  actorUserId: string,
+  action: string,
+  details: Record<string, unknown> = {},
+  severity: 'info' | 'warning' | 'critical' = 'info',
+) {
+  if (!env.SUPABASE_SERVICE_ROLE_KEY) return;
+  await supabaseAdmin.from('audit_logs').insert({
+    workspace_id: workspaceId,
+    actor_user_id: actorUserId,
+    action,
+    entity_type: 'workspace',
+    entity_id: workspaceId,
+    details,
+    severity,
+  });
+}
 
 router.get('/', requireAuth, asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
@@ -94,6 +143,107 @@ router.post('/onboarding/:step', requireAuth, requireWorkspace, requireRole('own
   if (error) return res.status(500).json({ error: 'ONBOARDING_PROGRESS_SAVE_FAILED' });
   await writeAudit(req, `onboarding.${parsed.data}_completed`, 'workspace', req.workspaceId!);
   res.json({ completed: parsed.data });
+}));
+
+// --- Account deletion: soft-delete + scheduled hard-purge -----------------
+// Requesting deletion revokes normal access immediately (requireWorkspace
+// rejects the workspace for every other route once deletion_requested_at is
+// set) but retains the data for WORKSPACE_DELETION_GRACE_DAYS in case of
+// recovery or a legal hold. The scheduled purge job
+// (server/automation/workspacePurge.ts) hard-deletes it afterward.
+
+router.get('/deletion/status', requireAuth, allowPendingWorkspaceDeletion, requireWorkspace, asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data, error } = await db.from('workspaces')
+    .select('deletion_requested_at,deletion_scheduled_for')
+    .eq('id', req.workspaceId!).single();
+  if (error) return res.status(500).json({ error: 'WORKSPACE_READ_FAILED' });
+  res.json({ deletionRequestedAt: data.deletion_requested_at, deletionScheduledFor: data.deletion_scheduled_for });
+}));
+
+router.post('/deletion/request', requireAuth, requireWorkspace, requireRole('owner'), requireSensitiveAuth, asyncRoute(async (req: AuthenticatedRequest, res) => {
+  // requireWorkspace already rejects (410) a workspace that has a deletion
+  // request in flight, so reaching here means none is pending.
+  const { requestedAt, scheduledFor } = computeDeletionSchedule();
+  const db = createUserClient(req.auth!.accessToken);
+  const { error } = await db.from('workspaces').update({
+    deletion_requested_at: requestedAt,
+    deletion_requested_by: req.auth!.userId,
+    deletion_scheduled_for: scheduledFor,
+    updated_at: requestedAt,
+  }).eq('id', req.workspaceId!);
+  if (error) return res.status(400).json({ error: 'WORKSPACE_DELETION_REQUEST_FAILED', message: error.message });
+
+  await writeAudit(req, 'workspace.deletion_requested', 'workspace', req.workspaceId!, { scheduledFor }, 'critical');
+  res.json({ deletionRequestedAt: requestedAt, deletionScheduledFor: scheduledFor });
+}));
+
+router.post('/deletion/cancel', requireAuth, allowPendingWorkspaceDeletion, requireWorkspace, requireRole('owner'), requireSensitiveAuth, asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data: current, error: readError } = await db.from('workspaces')
+    .select('deletion_requested_at').eq('id', req.workspaceId!).single();
+  if (readError) return res.status(500).json({ error: 'WORKSPACE_READ_FAILED' });
+  if (!current?.deletion_requested_at) return res.status(409).json({ error: 'NO_DELETION_PENDING' });
+
+  const { error } = await db.from('workspaces').update({
+    deletion_requested_at: null,
+    deletion_requested_by: null,
+    deletion_scheduled_for: null,
+    updated_at: new Date().toISOString(),
+  }).eq('id', req.workspaceId!);
+  if (error) return res.status(400).json({ error: 'WORKSPACE_DELETION_CANCEL_FAILED', message: error.message });
+
+  await writeAudit(req, 'workspace.deletion_cancelled', 'workspace', req.workspaceId!, {}, 'warning');
+  res.json({ cancelled: true });
+}));
+
+// Self-service "delete my account" entry point. This never calls
+// supabaseAdmin.auth.admin.deleteUser directly -- deleting the auth user
+// while they still own live workspace data would orphan it ahead of the
+// retention/legal-hold window everywhere else in this policy. Instead it
+// requests deletion of every workspace the caller owns (each then follows
+// the same 30-day grace window above); the scheduled purge job deletes the
+// caller's auth account itself once none of their owned workspaces remain
+// (see server/automation/workspacePurge.ts). Workspaces where the caller is
+// only a member (not owner) are unaffected -- there is no "leave workspace"
+// endpoint yet (server/routes/team.ts only supports inviting members), so
+// those memberships are reported back rather than silently left in place.
+router.post('/deletion/request-account', requireAuth, requireSensitiveAuth, asyncRoute(async (req: AuthenticatedRequest, res) => {
+  const db = createUserClient(req.auth!.accessToken);
+  const { data: memberships, error } = await db.from('workspace_members')
+    .select('workspace_id,role,workspaces(id,deletion_requested_at)')
+    .eq('user_id', req.auth!.userId)
+    .eq('status', 'active');
+  if (error) return res.status(500).json({ error: 'MEMBERSHIP_READ_FAILED' });
+
+  const owned = (memberships ?? []).filter((row: any) => row.role === 'owner');
+  const nonOwned = (memberships ?? []).filter((row: any) => row.role !== 'owner');
+
+  const { requestedAt, scheduledFor } = computeDeletionSchedule();
+  const requestedWorkspaceIds: string[] = [];
+  for (const row of owned as any[]) {
+    const workspace = Array.isArray(row.workspaces) ? row.workspaces[0] : row.workspaces;
+    if (workspace?.deletion_requested_at) continue; // already pending
+    const { error: updateError } = await db.from('workspaces').update({
+      deletion_requested_at: requestedAt,
+      deletion_requested_by: req.auth!.userId,
+      deletion_scheduled_for: scheduledFor,
+      updated_at: requestedAt,
+    }).eq('id', row.workspace_id);
+    if (!updateError) {
+      requestedWorkspaceIds.push(row.workspace_id);
+      await writeWorkspaceAudit(row.workspace_id, req.auth!.userId, 'workspace.deletion_requested', { scheduledFor, viaAccountDeletion: true }, 'critical');
+    }
+  }
+
+  res.json({
+    deletionScheduledFor: requestedWorkspaceIds.length ? scheduledFor : null,
+    requestedWorkspaceIds,
+    remainingMemberships: nonOwned.map((row: any) => row.workspace_id),
+    message: nonOwned.length
+      ? 'Your owned workspaces are scheduled for deletion. You are still a member of other workspaces you do not own -- ask their owner to remove you, or wait for a "leave workspace" option, to fully close your account.'
+      : undefined,
+  });
 }));
 
 export default router;

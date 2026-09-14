@@ -25,6 +25,10 @@ export type AuthenticatedRequest = Request & {
   workspaceId?: string;
   workspaceRole?: WorkspaceRole;
   requestId?: string;
+  // Set by allowPendingWorkspaceDeletion for the small set of deletion-management
+  // routes (status/cancel) that must remain reachable during the 30-day grace
+  // window even though requireWorkspace otherwise treats the workspace as gone.
+  allowPendingWorkspaceDeletion?: boolean;
 };
 
 export function readAal(token: string): 'aal1' | 'aal2' | null {
@@ -70,7 +74,7 @@ export async function requireWorkspace(req: AuthenticatedRequest, res: Response,
   const db = createUserClient(req.auth.accessToken);
   const { data, error } = await db
     .from('workspace_members')
-    .select('workspace_id, role')
+    .select('workspace_id, role, workspaces(deletion_requested_at)')
     .eq('workspace_id', workspaceId)
     .eq('user_id', req.auth.userId)
     .eq('status', 'active')
@@ -79,8 +83,30 @@ export async function requireWorkspace(req: AuthenticatedRequest, res: Response,
   if (error) return res.status(500).json({ error: 'TENANT_CHECK_FAILED' });
   if (!data) return res.status(403).json({ error: 'WORKSPACE_ACCESS_DENIED' });
 
+  // A workspace with deletion_requested_at set has had its access revoked as
+  // of the deletion request — it is retained for the 30-day grace window
+  // (recovery/legal holds) but must behave as already gone for every normal
+  // route. The only exception is the small set of deletion-management routes
+  // (status/cancel) that mark themselves with allowPendingWorkspaceDeletion
+  // *before* this middleware runs, so an owner can still cancel within the
+  // grace window.
+  const workspaceRow = Array.isArray((data as any).workspaces) ? (data as any).workspaces[0] : (data as any).workspaces;
+  if (workspaceRow?.deletion_requested_at && !req.allowPendingWorkspaceDeletion) {
+    return res.status(410).json({ error: 'WORKSPACE_DELETION_PENDING' });
+  }
+
   req.workspaceId = workspaceId;
   req.workspaceRole = data.role as WorkspaceRole;
+  next();
+}
+
+// Marks the request so requireWorkspace lets a workspace with
+// deletion_requested_at set through. Must run before requireWorkspace in the
+// middleware chain. Only the deletion-management routes (status/cancel)
+// should use this — every other route must keep treating a pending-deletion
+// workspace as inaccessible.
+export function allowPendingWorkspaceDeletion(req: AuthenticatedRequest, _res: Response, next: NextFunction) {
+  req.allowPendingWorkspaceDeletion = true;
   next();
 }
 

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import { z } from 'zod';
-import { asyncRoute, validateBody } from '../security';
+import { applyKeysetCursor, asyncRoute, buildPage, dbErrorMessage, parseCursor, validateBody } from '../security';
 import { env } from '../env';
 import { sendEmail, emailConfigured } from '../providers/email';
 import { hashShareToken, canDecideQuote } from './public';
@@ -47,18 +47,23 @@ router.post('/appointments', requireRole('owner','admin','manager','staff'), val
     if (conflict?.length) return res.status(409).json({ error: 'BOOKING_CONFLICT' });
   }
   const { data, error } = await db.from('appointments').insert({ ...req.body, workspace_id: req.workspaceId!, status: 'scheduled', source: 'jobrin-ai' }).select('*').single();
-  if (error) return res.status(400).json({ error: 'APPOINTMENT_CREATE_FAILED', message: error.message });
+  if (error) return res.status(400).json({ error: 'APPOINTMENT_CREATE_FAILED', message: dbErrorMessage(error) });
   await writeAudit(req, 'appointment.created', 'appointment', data.id);
   res.status(201).json({ appointment: data });
 }));
 
 router.get('/jobs', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
-  const { data, error } = await db.from('jobs')
-    .select('id,job_number,title,status,address_text,scheduled_start,scheduled_end,completed_at,customer_id,customers(display_name),service_id,services(name),assigned_user_id')
-    .eq('workspace_id', req.workspaceId!).order('created_at', { ascending: false }).limit(300);
+  const limit = 300;
+  const cursor = parseCursor(req.query.cursor);
+  let query = db.from('jobs')
+    .select('id,job_number,title,status,address_text,scheduled_start,scheduled_end,completed_at,customer_id,customers(display_name),service_id,services(name),assigned_user_id,created_at')
+    .eq('workspace_id', req.workspaceId!);
+  query = applyKeysetCursor(query, cursor);
+  const { data, error } = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
   if (error) return res.status(500).json({ error: 'JOB_LIST_FAILED' });
-  res.json({ jobs: data ?? [] });
+  const { page, nextCursor, hasMore } = buildPage(data ?? [], limit);
+  res.json({ jobs: page, nextCursor, hasMore });
 }));
 
 router.get('/jobs/:id', asyncRoute(async (req: AuthenticatedRequest, res) => {
@@ -103,7 +108,7 @@ router.post('/jobs', requireRole('owner','admin','manager','staff'), validateBod
 })), asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const { data, error } = await db.from('jobs').insert({ ...req.body, workspace_id: req.workspaceId! }).select('*').single();
-  if (error) return res.status(400).json({ error: 'JOB_CREATE_FAILED', message: error.message });
+  if (error) return res.status(400).json({ error: 'JOB_CREATE_FAILED', message: dbErrorMessage(error) });
   await writeAudit(req, 'job.created', 'job', data.id);
   res.status(201).json({ job: data });
 }));
@@ -155,7 +160,7 @@ router.post('/jobs/:id/time', requireRole('owner', 'admin', 'manager', 'staff'),
     started_at: startedAt.toISOString(), ended_at: endedAt ? endedAt.toISOString() : null,
     break_minutes: req.body.break_minutes, notes: req.body.notes,
   }).select('id,user_id,started_at,ended_at,break_minutes,notes').single();
-  if (error) return res.status(400).json({ error: 'TIME_ENTRY_CREATE_FAILED', message: error.message });
+  if (error) return res.status(400).json({ error: 'TIME_ENTRY_CREATE_FAILED', message: dbErrorMessage(error) });
   await writeAudit(req, 'job.time.logged', 'job_time_entry', entry.id);
   res.status(201).json({ entry });
 }));
@@ -196,7 +201,7 @@ router.post('/jobs/:id/materials', requireRole('owner', 'admin', 'manager', 'sta
     unit_cost_cents: req.body.unit_cost_cents, unit_price_cents: req.body.unit_price_cents,
     supplier_reference: req.body.supplier_reference || null,
   }).select('id,description,quantity,unit_cost_cents,unit_price_cents,supplier').single();
-  if (error) return res.status(400).json({ error: 'MATERIAL_CREATE_FAILED', message: error.message });
+  if (error) return res.status(400).json({ error: 'MATERIAL_CREATE_FAILED', message: dbErrorMessage(error) });
   await writeAudit(req, 'job.materials.added', 'job_material', material.id, { description: req.body.description });
   res.status(201).json({ material });
 }));
@@ -214,15 +219,30 @@ router.delete('/jobs/:id/materials/:materialId', requireRole('owner', 'admin', '
 // ---------- Workspace time & materials log ----------
 // Cross-job view of every logged hour and material so owners can see who
 // worked what, when, and what it cost — without opening each job.
+// Two independent lists sharing one endpoint: each gets its own cursor
+// (timeCursor / materialsCursor in, nextTimeCursor / nextMaterialsCursor
+// out) since they paginate at different rates and are otherwise unrelated.
 router.get('/time-materials', requireRole('owner', 'admin', 'manager', 'staff'), asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
+  const limit = 200;
+  const timeCursor = parseCursor(req.query.timeCursor);
+  const materialsCursor = parseCursor(req.query.materialsCursor);
+  let timeQuery = db.from('job_time_entries').select('id,job_id,started_at,ended_at,break_minutes,notes,created_at,jobs(id,job_number,title,status)').eq('workspace_id', req.workspaceId!);
+  timeQuery = applyKeysetCursor(timeQuery, timeCursor);
+  let materialQuery = db.from('job_materials').select('id,job_id,description,supplier,quantity,unit_cost_cents,unit_price_cents,created_at,jobs(id,job_number,title,status)').eq('workspace_id', req.workspaceId!);
+  materialQuery = applyKeysetCursor(materialQuery, materialsCursor);
   const [timeResult, materialResult] = await Promise.all([
-    db.from('job_time_entries').select('id,job_id,started_at,ended_at,break_minutes,notes,created_at,jobs(id,job_number,title,status)').eq('workspace_id', req.workspaceId!).order('created_at', { ascending: false }).limit(200),
-    db.from('job_materials').select('id,job_id,description,supplier,quantity,unit_cost_cents,unit_price_cents,created_at,jobs(id,job_number,title,status)').eq('workspace_id', req.workspaceId!).order('created_at', { ascending: false }).limit(200),
+    timeQuery.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1),
+    materialQuery.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1),
   ]);
   const readError = timeResult.error || materialResult.error;
   if (readError) return res.status(500).json({ error: 'TIME_MATERIALS_LIST_FAILED', message: readError.message });
-  res.json({ timeEntries: timeResult.data ?? [], materials: materialResult.data ?? [] });
+  const time = buildPage(timeResult.data ?? [], limit);
+  const materials = buildPage(materialResult.data ?? [], limit);
+  res.json({
+    timeEntries: time.page, nextTimeCursor: time.nextCursor, hasMoreTime: time.hasMore,
+    materials: materials.page, nextMaterialsCursor: materials.nextCursor, hasMoreMaterials: materials.hasMore,
+  });
 }));
 
 // ---------- Recurring jobs & service agreements ----------
@@ -243,11 +263,16 @@ function advanceCadence(from: Date, cadence: string): Date {
 }
 
 router.get('/service-agreements', requireRole('owner', 'admin', 'manager', 'staff'), asyncRoute(async (req: AuthenticatedRequest, res) => {
-  const { data, error } = await supabaseAdmin.from('service_agreements')
+  const limit = 300;
+  const cursor = parseCursor(req.query.cursor);
+  let query = supabaseAdmin.from('service_agreements')
     .select('id,customer_id,customers(display_name),service_id,services(name),name,status,cadence,price_cents,next_service_at,starts_at,ends_at,created_at,updated_at')
-    .eq('workspace_id', req.workspaceId!).order('created_at', { ascending: false }).limit(300);
-  if (error) return res.status(500).json({ error: 'AGREEMENT_LIST_FAILED', message: error.message });
-  res.json({ agreements: data ?? [] });
+    .eq('workspace_id', req.workspaceId!);
+  query = applyKeysetCursor(query, cursor);
+  const { data, error } = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
+  if (error) return res.status(500).json({ error: 'AGREEMENT_LIST_FAILED', message: dbErrorMessage(error) });
+  const { page, nextCursor, hasMore } = buildPage(data ?? [], limit);
+  res.json({ agreements: page, nextCursor, hasMore });
 }));
 
 router.post('/service-agreements', requireRole('owner', 'admin', 'manager'), validateBody(z.object({
@@ -277,7 +302,7 @@ router.post('/service-agreements', requireRole('owner', 'admin', 'manager'), val
     price_cents: req.body.price_cents, starts_at: req.body.starts_at ?? new Date().toISOString().slice(0, 10),
     next_service_at: nextServiceAt, terms: { notes: req.body.notes },
   }).select('id,name,status,cadence,price_cents,next_service_at').single();
-  if (error) return res.status(400).json({ error: 'AGREEMENT_CREATE_FAILED', message: error.message });
+  if (error) return res.status(400).json({ error: 'AGREEMENT_CREATE_FAILED', message: dbErrorMessage(error) });
   await writeAudit(req, 'agreement.created', 'service_agreement', data.id, { name: req.body.name, cadence: req.body.cadence });
   res.status(201).json({ agreement: data });
 }));
@@ -412,7 +437,7 @@ router.post('/jobs/:id/checklists', requireRole('owner', 'admin', 'manager', 'st
     workspace_id: req.workspaceId!, job_id: job.id, template_id: req.body.template_id || null,
     title: req.body.title, results: req.body.results, all_critical_done: allCriticalDone, completed_by: req.auth!.userId,
   }).select('id,title,results,all_critical_done,completed_at,created_at').single();
-  if (error) return res.status(400).json({ error: 'CHECKLIST_CREATE_FAILED', message: error.message });
+  if (error) return res.status(400).json({ error: 'CHECKLIST_CREATE_FAILED', message: dbErrorMessage(error) });
   await writeAudit(req, 'job.checklist.completed', 'job_checklist', checklist.id, { title: req.body.title });
   res.status(201).json({ checklist });
 }));
@@ -429,7 +454,7 @@ router.post('/jobs/:id/signatures', requireRole('owner', 'admin', 'manager', 'st
     workspace_id: req.workspaceId!, job_id: job.id, customer_name: req.body.customer_name,
     signature_data: req.body.signature_data, ip_address: req.ip,
   }).select('id,customer_name,signed_at').single();
-  if (error) return res.status(400).json({ error: 'SIGNATURE_CREATE_FAILED', message: error.message });
+  if (error) return res.status(400).json({ error: 'SIGNATURE_CREATE_FAILED', message: dbErrorMessage(error) });
   await writeAudit(req, 'job.signature.captured', 'job_signature', signature.id, { customer: req.body.customer_name });
   res.status(201).json({ signature });
 }));
@@ -502,9 +527,14 @@ router.patch('/jobs/:id/status', requireRole('owner','admin','manager','staff'),
 
 router.get('/quotes', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
-  const { data, error } = await db.from('quotes').select('id,quote_number,status,total_cents,expires_at,created_at,customer_id,customers(display_name),job_id').eq('workspace_id', req.workspaceId!).order('created_at', { ascending: false }).limit(300);
+  const limit = 300;
+  const cursor = parseCursor(req.query.cursor);
+  let query = db.from('quotes').select('id,quote_number,status,total_cents,expires_at,created_at,customer_id,customers(display_name),job_id').eq('workspace_id', req.workspaceId!);
+  query = applyKeysetCursor(query, cursor);
+  const { data, error } = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
   if (error) return res.status(500).json({ error: 'QUOTE_LIST_FAILED' });
-  res.json({ quotes: data ?? [] });
+  const { page, nextCursor, hasMore } = buildPage(data ?? [], limit);
+  res.json({ quotes: page, nextCursor, hasMore });
 }));
 
 export const documentItems = z.array(z.object({
@@ -546,7 +576,7 @@ router.post('/quotes', requireRole('owner','admin','manager','staff'), validateB
   const totalCents = totals.subtotal + totals.gst;
   if (req.body.deposit_cents > totalCents) return res.status(400).json({ error: 'DEPOSIT_EXCEEDS_TOTAL' });
   const { data: quote, error } = await db.from('quotes').insert({ workspace_id:req.workspaceId!, customer_id:req.body.customer_id, job_id:req.body.job_id||null, expires_at:req.body.expires_at||null, terms:req.body.terms, notes:req.body.notes, deposit_cents:req.body.deposit_cents, subtotal_cents:totals.subtotal, gst_cents:totals.gst, total_cents:totalCents, status:'draft' }).select('*').single();
-  if (error) return res.status(400).json({ error:'QUOTE_CREATE_FAILED', message:error.message });
+  if (error) return res.status(400).json({ error:'QUOTE_CREATE_FAILED', message:dbErrorMessage(error) });
   const rows=req.body.items.map((item:any,index:number)=>({ ...item, workspace_id:req.workspaceId!, quote_id:quote.id, version:1, sort_order:index }));
   const { error:itemError }=await db.from('quote_items').insert(rows);
   if(itemError){await db.from('quotes').delete().eq('workspace_id',req.workspaceId!).eq('id',quote.id);return res.status(400).json({error:'QUOTE_ITEMS_CREATE_FAILED'});}
@@ -691,9 +721,14 @@ router.post('/quotes/:id/convert', requireRole('owner','admin','manager','staff'
 
 router.get('/invoices', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
-  const { data, error } = await db.from('invoices').select('id,invoice_number,status,total_cents,amount_paid_cents,balance_due_cents,due_at,created_at,customer_id,customers(display_name),job_id').eq('workspace_id', req.workspaceId!).order('created_at', { ascending: false }).limit(300);
+  const limit = 300;
+  const cursor = parseCursor(req.query.cursor);
+  let query = db.from('invoices').select('id,invoice_number,status,total_cents,amount_paid_cents,balance_due_cents,due_at,created_at,customer_id,customers(display_name),job_id').eq('workspace_id', req.workspaceId!);
+  query = applyKeysetCursor(query, cursor);
+  const { data, error } = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
   if (error) return res.status(500).json({ error: 'INVOICE_LIST_FAILED' });
-  res.json({ invoices: data ?? [] });
+  const { page, nextCursor, hasMore } = buildPage(data ?? [], limit);
+  res.json({ invoices: page, nextCursor, hasMore });
 }));
 
 // Shared invoice payment-session builder. The email send and the manual
@@ -734,7 +769,7 @@ router.post('/invoices', requireRole('owner','admin','manager','staff'), validat
   const totals = calculateDocument(req.body.items);
   const totalCents = totals.subtotal + totals.gst;
   const { data:invoice,error }=await db.from('invoices').insert({workspace_id:req.workspaceId!,customer_id:req.body.customer_id,job_id:req.body.job_id||null,quote_id:req.body.quote_id||null,due_at:req.body.due_at||null,subtotal_cents:totals.subtotal,gst_cents:totals.gst,total_cents:totalCents,balance_due_cents:totalCents,status:'draft'}).select('*').single();
-  if(error)return res.status(400).json({error:'INVOICE_CREATE_FAILED',message:error.message});
+  if(error)return res.status(400).json({error:'INVOICE_CREATE_FAILED',message:dbErrorMessage(error)});
   const rows=req.body.items.map((item:any,index:number)=>({...item,workspace_id:req.workspaceId!,invoice_id:invoice.id,sort_order:index}));
   const {error:itemError}=await db.from('invoice_items').insert(rows);
   if(itemError){await db.from('invoices').delete().eq('workspace_id',req.workspaceId!).eq('id',invoice.id);return res.status(400).json({error:'INVOICE_ITEMS_CREATE_FAILED'});}
@@ -799,9 +834,14 @@ router.patch('/invoices/:id/send', requireRole('owner','admin','manager','staff'
 
 router.get('/payments', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
-  const { data, error } = await db.from('payments').select('id,amount_cents,currency,status,paid_at,created_at,customer_id,customers(display_name),invoice_id').eq('workspace_id', req.workspaceId!).order('created_at', { ascending: false }).limit(300);
+  const limit = 300;
+  const cursor = parseCursor(req.query.cursor);
+  let query = db.from('payments').select('id,amount_cents,currency,status,paid_at,created_at,customer_id,customers(display_name),invoice_id').eq('workspace_id', req.workspaceId!);
+  query = applyKeysetCursor(query, cursor);
+  const { data, error } = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
   if (error) return res.status(500).json({ error: 'PAYMENT_LIST_FAILED' });
-  res.json({ payments: data ?? [] });
+  const { page, nextCursor, hasMore } = buildPage(data ?? [], limit);
+  res.json({ payments: page, nextCursor, hasMore });
 }));
 
 router.post('/invoices/:id/checkout', requireRole('owner','admin','manager'), requireSensitiveAuth, asyncRoute(async (req: AuthenticatedRequest, res) => {

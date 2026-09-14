@@ -1,6 +1,7 @@
 import { supabaseAdmin, writeNotification } from '../supabase';
 import { toolByName, requiresApproval, canExecute } from '../ai/toolRegistry';
 import { generateBookingSlots, type BusinessHourRule } from '../routes/public';
+import { purgeScheduledWorkspaceDeletions } from './workspacePurge';
 
 // Automation executor: processes the automation_runs queue that the Business
 // Brain worker alone previously left untouched. Runs are claimed atomically,
@@ -427,6 +428,13 @@ export function startAutomationRunner() {
   const runSafely = () => {
     void processAutomationRuns().catch((error) => {
       console.error(JSON.stringify({ level: 'error', component: 'automation_runner', message: 'Automation tick failed; retrying next interval', error: String((error as Error)?.message || error).slice(0, 200) }));
+    });
+    // Reuses this same tick rather than a second interval timer -- the
+    // workspace deletion purge has no tighter latency requirement than the
+    // automation queue does, and failures here must stay isolated from the
+    // automation queue's own failures (hence the separate catch).
+    void purgeScheduledWorkspaceDeletions().catch((error) => {
+      console.error(JSON.stringify({ level: 'error', component: 'workspace_purge', message: 'Workspace purge tick failed; retrying next interval', error: String((error as Error)?.message || error).slice(0, 200) }));
     });
   };
   const timer = setInterval(runSafely, 30_000);

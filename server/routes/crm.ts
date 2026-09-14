@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { asyncRoute, validateBody } from '../security';
+import { applyKeysetCursor, asyncRoute, buildPage, dbErrorMessage, parseCursor, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest, writeAudit, writeNotification } from '../supabase';
 import { queueAutomationRun } from '../automation/runner';
 
@@ -29,16 +29,18 @@ const customerInput = z.object({
 router.get('/customers', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const search = String(req.query.search || '').trim().slice(0, 120);
+  const limit = 100;
+  const cursor = parseCursor(req.query.cursor);
   let query = db.from('customers')
     .select('id,first_name,last_name,display_name,phone,email,source,tags,lifetime_value_cents,last_activity_at,created_at')
     .eq('workspace_id', req.workspaceId!)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false })
-    .limit(100);
+    .is('deleted_at', null);
   if (search) query = query.or(`display_name.ilike.%${search.replace(/[%_,]/g, '')}%,email.ilike.%${search.replace(/[%_,]/g, '')}%,phone.ilike.%${search.replace(/[%_,]/g, '')}%`);
-  const { data, error } = await query;
+  query = applyKeysetCursor(query, cursor);
+  const { data, error } = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
   if (error) return res.status(500).json({ error: 'CUSTOMER_LIST_FAILED' });
-  res.json({ customers: data ?? [] });
+  const { page, nextCursor, hasMore } = buildPage(data ?? [], limit);
+  res.json({ customers: page, nextCursor, hasMore });
 }));
 
 router.get('/customers/:id', asyncRoute(async (req: AuthenticatedRequest, res) => {
@@ -77,7 +79,7 @@ router.post('/customers', requireRole('owner','admin','manager','staff'), valida
   const { data, error } = await db.from('customers').insert(payload).select('*').single();
   if (error) {
     if (/duplicate/i.test(error.message)) return res.status(409).json({ error: 'CUSTOMER_DUPLICATE' });
-    return res.status(400).json({ error: 'CUSTOMER_CREATE_FAILED', message: error.message });
+    return res.status(400).json({ error: 'CUSTOMER_CREATE_FAILED', message: dbErrorMessage(error) });
   }
   await writeAudit(req, 'customer.created', 'customer', data.id);
   res.status(201).json({ customer: data });
@@ -95,22 +97,24 @@ const leadInput = z.object({
 router.get('/leads', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const stage = String(req.query.stage || '').trim();
+  const limit = 200;
+  const cursor = parseCursor(req.query.cursor);
   let query = db.from('leads')
     .select('id,title,description,stage,source,estimated_value_cents,owner_user_id,created_at,updated_at,customer_id,customers(display_name,phone,email),service_id,services(name)')
     .eq('workspace_id', req.workspaceId!)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false })
-    .limit(200);
+    .is('deleted_at', null);
   if (stage) query = query.eq('stage', stage);
-  const { data, error } = await query;
+  query = applyKeysetCursor(query, cursor);
+  const { data, error } = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
   if (error) return res.status(500).json({ error: 'LEAD_LIST_FAILED' });
-  res.json({ leads: data ?? [] });
+  const { page, nextCursor, hasMore } = buildPage(data ?? [], limit);
+  res.json({ leads: page, nextCursor, hasMore });
 }));
 
 router.post('/leads', requireRole('owner','admin','manager','staff'), validateBody(leadInput), asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const { data, error } = await db.from('leads').insert({ ...req.body, workspace_id: req.workspaceId!, created_by: req.auth!.userId }).select('*').single();
-  if (error) return res.status(400).json({ error: 'LEAD_CREATE_FAILED', message: error.message });
+  if (error) return res.status(400).json({ error: 'LEAD_CREATE_FAILED', message: dbErrorMessage(error) });
   await writeAudit(req, 'lead.created', 'lead', data.id);
   await writeNotification(req.workspaceId!, 'lead.created', 'New lead needs a response', `${data.title} — move it through the pipeline while it is fresh.`, 'lead', data.id);
   // Best-effort: an automation dispatch failure must never break lead creation.

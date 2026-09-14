@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { asyncRoute, validateBody } from '../security';
+import { applyKeysetCursor, asyncRoute, buildPage, parseCursor, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
 import { operatorTools, toolByName } from '../ai/toolRegistry';
 import { isAutomationExecutable } from '../automation/runner';
@@ -8,6 +8,13 @@ import { isAutomationExecutable } from '../automation/runner';
 const router = Router();
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('ai.basic'));
 
+// NOTE: ordered by last_message_at (not created_at) — that column is
+// nullable and mutated by every new message, so it cannot support a stable
+// keyset cursor the way the other list endpoints do without changing this
+// endpoint's semantics (a paginated "sorted by last activity" list would
+// have to be reordered relative to earlier pages every time a message
+// arrives). Left as a fixed-limit list; revisit if this becomes truncation
+// in practice.
 router.get('/conversations', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const { data, error } = await db.from('conversations')
@@ -49,9 +56,14 @@ router.post('/knowledge', requireRole('owner','admin','manager'), validateBody(z
 
 router.get('/approvals', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
-  const { data, error } = await db.from('approvals').select('id,resource_type,resource_id,reason,status,requested_by,decided_by,decision_note,created_at,decided_at,ai_action_id').eq('workspace_id', req.workspaceId!).order('created_at', { ascending: false }).limit(200);
+  const limit = 200;
+  const cursor = parseCursor(req.query.cursor);
+  let query = db.from('approvals').select('id,resource_type,resource_id,reason,status,requested_by,decided_by,decision_note,created_at,decided_at,ai_action_id').eq('workspace_id', req.workspaceId!);
+  query = applyKeysetCursor(query, cursor);
+  const { data, error } = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
   if (error) return res.status(500).json({ error: 'APPROVAL_LIST_FAILED' });
-  res.json({ approvals: data ?? [] });
+  const { page, nextCursor, hasMore } = buildPage(data ?? [], limit);
+  res.json({ approvals: page, nextCursor, hasMore });
 }));
 
 router.post('/approvals/:id/decision', requireRole('owner','admin','manager'), validateBody(z.object({ decision: z.enum(['approved','rejected']), note: z.string().trim().max(2000).default('') })), asyncRoute(async (req: AuthenticatedRequest, res) => {
@@ -82,14 +94,19 @@ router.post('/approvals/:id/decision', requireRole('owner','admin','manager'), v
 
 router.get('/ai-actions', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
-  const { data, error } = await db.from('ai_actions').select('id,tool_name,risk_level,status,approval_required,error_code,cost_microunits,created_at,completed_at,customer_id,conversation_id').eq('workspace_id', req.workspaceId!).order('created_at',{ascending:false}).limit(300);
+  const limit = 300;
+  const cursor = parseCursor(req.query.cursor);
+  let query = db.from('ai_actions').select('id,tool_name,risk_level,status,approval_required,error_code,cost_microunits,created_at,completed_at,customer_id,conversation_id').eq('workspace_id', req.workspaceId!);
+  query = applyKeysetCursor(query, cursor);
+  const { data, error } = await query.order('created_at',{ascending:false}).order('id',{ascending:false}).limit(limit + 1);
   if (error) return res.status(500).json({ error: 'AI_ACTION_LIST_FAILED' });
+  const { page, nextCursor, hasMore } = buildPage(data ?? [], limit);
   // Tag each action with the department (specialist) that owns its tool.
-  const actions = (data ?? []).map((row: any) => ({
+  const actions = page.map((row: any) => ({
     ...row,
     specialist: toolByName(row.tool_name)?.specialist ?? (/^admin\.(receptionist|finance|sales|marketing|support|business_brain)\./.exec(row.tool_name)?.[1] ?? null),
   }));
-  res.json({ actions });
+  res.json({ actions, nextCursor, hasMore });
 }));
 
 router.get('/capabilities', asyncRoute(async (_req: AuthenticatedRequest, res) => {
@@ -153,17 +170,33 @@ router.post('/automations/:id/run',requireRole('owner','admin','manager'),asyncR
 }));
 
 router.get('/automation-runs',asyncRoute(async(req:AuthenticatedRequest,res)=>{
-  const db=createUserClient(req.auth!.accessToken);const {data,error}=await db.from('automation_runs').select('id,automation_id,status,attempt_count,max_attempts,next_attempt_at,last_error,started_at,completed_at,created_at,automations(name)').eq('workspace_id',req.workspaceId!).order('created_at',{ascending:false}).limit(100);
-  if(error)return res.status(500).json({error:'AUTOMATION_RUN_LIST_FAILED'});res.json({runs:data??[]});
+  const db=createUserClient(req.auth!.accessToken);const limit=100;const cursor=parseCursor(req.query.cursor);
+  let query=db.from('automation_runs').select('id,automation_id,status,attempt_count,max_attempts,next_attempt_at,last_error,started_at,completed_at,created_at,automations(name)').eq('workspace_id',req.workspaceId!);
+  query=applyKeysetCursor(query,cursor);
+  const {data,error}=await query.order('created_at',{ascending:false}).order('id',{ascending:false}).limit(limit+1);
+  if(error)return res.status(500).json({error:'AUTOMATION_RUN_LIST_FAILED'});
+  const {page,nextCursor,hasMore}=buildPage(data??[],limit);res.json({runs:page,nextCursor,hasMore});
 }));
 
 router.get('/reviews', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
-  const { data, error } = await db.from('review_requests').select('id,channel,status,rating,feedback,sent_at,completed_at,created_at,customer_id,customers(display_name),job_id').eq('workspace_id', req.workspaceId!).order('created_at',{ascending:false}).limit(300);
+  const limit = 300;
+  const cursor = parseCursor(req.query.cursor);
+  let query = db.from('review_requests').select('id,channel,status,rating,feedback,sent_at,completed_at,created_at,customer_id,customers(display_name),job_id').eq('workspace_id', req.workspaceId!);
+  query = applyKeysetCursor(query, cursor);
+  const { data, error } = await query.order('created_at',{ascending:false}).order('id',{ascending:false}).limit(limit + 1);
   if (error) return res.status(500).json({ error: 'REVIEW_LIST_FAILED' });
-  res.json({ reviews: data ?? [] });
+  const { page, nextCursor, hasMore } = buildPage(data ?? [], limit);
+  res.json({ reviews: page, nextCursor, hasMore });
 }));
 
+// NOT cursor-paginated: `sources` is a rollup computed from every matching
+// row (revenue by source), not a page of independent records — paginating
+// the underlying query would silently understate older sources' totals
+// rather than truncate a list. `events` is the raw feed behind it and
+// inherits the same constraint. Left on its existing fixed limit(1000);
+// a real fix here is a database-side aggregate (e.g. a materialized view or
+// GROUP BY query), not a cursor.
 router.get('/attribution', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const { data, error } = await db.from('revenue_attributions').select('source,medium,touch_type,revenue_cents,created_at,campaign_id,lead_id,job_id,payment_id').eq('workspace_id', req.workspaceId!).order('created_at',{ascending:false}).limit(1000);

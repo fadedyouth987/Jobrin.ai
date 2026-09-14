@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { asyncRoute, validateBody } from '../security';
+import { applyKeysetCursor, asyncRoute, buildPage, parseCursor, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest, writeAudit } from '../supabase';
 
 const router = Router();
@@ -76,18 +76,20 @@ router.post('/openings', validateBody(openingInput), asyncRoute(async (req: Auth
 router.get('/applications', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const openingId = String(req.query.opening_id || '').trim();
+  const limit = 250;
+  const cursor = parseCursor(req.query.cursor);
   let query = db.from('candidate_applications')
     .select('id,job_opening_id,candidate_id,stage,notes,stage_changed_at,created_at,job_openings(title,trade,location,status),candidates(full_name,email,phone,suburb,experience_summary,licences,availability,source,consent_captured_at)')
-    .eq('workspace_id', req.workspaceId!)
-    .order('created_at', { ascending: false })
-    .limit(250);
+    .eq('workspace_id', req.workspaceId!);
   if (openingId) {
     if (!/^[0-9a-fA-F-]{36}$/.test(openingId)) return res.status(400).json({ error: 'INVALID_OPENING_ID' });
     query = query.eq('job_opening_id', openingId);
   }
-  const { data, error } = await query;
+  query = applyKeysetCursor(query, cursor);
+  const { data, error } = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
   if (error) return res.status(500).json({ error: 'HIRING_APPLICATIONS_LOAD_FAILED' });
-  res.json({ applications: data ?? [] });
+  const { page, nextCursor, hasMore } = buildPage(data ?? [], limit);
+  res.json({ applications: page, nextCursor, hasMore });
 }));
 
 router.post('/candidates', validateBody(candidateInput), asyncRoute(async (req: AuthenticatedRequest, res) => {

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
-import { asyncRoute, validateBody } from '../security';
+import { applyKeysetCursor, asyncRoute, buildPage, parseCursor, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
 import { decideMemoryStatus, MEMORY_RULE_VERSION } from '../ai/memoryPolicy';
 
@@ -10,8 +10,19 @@ const statuses=['candidate','active','challenged','stale','archived'] as const;
 
 router.get('/memories',asyncRoute(async(req:AuthenticatedRequest,res)=>{
   const db=createUserClient(req.auth!.accessToken);const status=z.enum(statuses).safeParse(req.query.status);const search=String(req.query.search||'').trim().slice(0,100);
-  let query=db.from('business_memories').select('id,scope_type,scope_id,category,memory_key,summary,status,confidence,sample_count,sensitivity,source_type,first_observed_at,last_observed_at,review_due_at,expires_at,confirmed_at,updated_at').eq('workspace_id',req.workspaceId!).order('updated_at',{ascending:false}).limit(300);
-  if(status.success)query=query.eq('status',status.data);if(search)query=query.ilike('summary',`%${search.replace(/[%_]/g,'')}%`);const {data,error}=await query;if(error)return res.status(500).json({error:'MEMORY_LIST_FAILED'});res.json({memories:data??[]});
+  const limit=300;const cursor=parseCursor(req.query.cursor);
+  let query=db.from('business_memories').select('id,scope_type,scope_id,category,memory_key,summary,status,confidence,sample_count,sensitivity,source_type,first_observed_at,last_observed_at,review_due_at,expires_at,confirmed_at,updated_at').eq('workspace_id',req.workspaceId!);
+  if(status.success)query=query.eq('status',status.data);if(search)query=query.ilike('summary',`%${search.replace(/[%_]/g,'')}%`);
+  // This list sorts by updated_at (not created_at), the column every status
+  // change bumps — kept as-is per the existing UI ordering, so the cursor
+  // keys off updated_at+id instead of the created_at+id scheme used
+  // elsewhere. updated_at is NOT NULL here (unlike conversations.last_message_at),
+  // so unlike that endpoint a keyset filter on it cannot silently drop rows.
+  query=applyKeysetCursor(query,cursor,{createdAt:'updated_at',id:'id'});
+  const {data,error}=await query.order('updated_at',{ascending:false}).order('id',{ascending:false}).limit(limit+1);
+  if(error)return res.status(500).json({error:'MEMORY_LIST_FAILED'});
+  const {page,nextCursor,hasMore}=buildPage(data??[],limit,'updated_at');
+  res.json({memories:page,nextCursor,hasMore});
 }));
 
 router.get('/memories/:id',asyncRoute(async(req:AuthenticatedRequest,res)=>{

@@ -70,6 +70,13 @@ router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
   res.json({ profile: profileResult.data, readiness: technical, goLive });
 }));
 
+// NOT cursor-paginated: `calls.started_at` is nullable in the schema
+// (server/../supabase/migrations/0003_revenue_os_core.sql), and a keyset
+// filter (`lt` a timestamp) can never match NULL — a page-2+ request would
+// silently and permanently drop any call still missing started_at. Left on
+// a fixed limit rather than risk that; revisit if calls need real
+// pagination (this list is capped at 50 and is a recent-activity view, not
+// a full call log today).
 router.get('/calls', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const { data, error } = await db.from('calls')

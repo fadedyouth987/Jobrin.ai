@@ -350,26 +350,59 @@ async function recordMessageTake(context: CallContext, fromNumber: string | null
 type ProviderUsage = { promptTokens: number; completionTokens: number; totalTokens: number };
 type OpenAiTurn = { configured: boolean; message: { role: 'assistant'; content: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> } | null; usage?: ProviderUsage };
 
-async function openaiChat(messages: Array<{ role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }>, tools: unknown[] = []): Promise<OpenAiTurn> {
+// Live phone call: a transient 429/5xx is worth a couple of bounded, short
+// retries (small fixed delay, not exponential — the latency budget on a call
+// turn is tight). Any other 4xx (bad request, invalid API key, etc.) is
+// permanent and must fail immediately rather than retry.
+const OPENAI_CHAT_MAX_RETRIES = 2;
+const OPENAI_CHAT_RETRY_DELAY_MS = 250;
+
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function openaiChat(messages: Array<{ role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }>, tools: unknown[] = []): Promise<OpenAiTurn> {
   if (!openaiConfigured()) return { configured: false, message: null };
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ model: env.OPENAI_MODEL, messages, ...(tools.length ? { tools } : {}) }),
-  });
-  if (!response.ok) throw new Error(`OPENAI_CHAT_FAILED:${response.status}`);
-  const payload: any = await response.json();
-  const message = payload.choices?.[0]?.message;
-  if (!message) throw new Error('OPENAI_CHAT_EMPTY');
-  return {
-    configured: true,
-    message: { role: 'assistant', content: message.content ?? null, tool_calls: message.tool_calls },
-    usage: {
-      promptTokens: Number(payload.usage?.prompt_tokens || 0),
-      completionTokens: Number(payload.usage?.completion_tokens || 0),
-      totalTokens: Number(payload.usage?.total_tokens || 0),
-    },
-  };
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= OPENAI_CHAT_MAX_RETRIES; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: env.OPENAI_MODEL, messages, ...(tools.length ? { tools } : {}) }),
+      });
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error('OPENAI_CHAT_NETWORK_FAILED');
+      if (attempt < OPENAI_CHAT_MAX_RETRIES) { await delay(OPENAI_CHAT_RETRY_DELAY_MS); continue; }
+      throw lastError;
+    }
+    if (!response.ok) {
+      if (isRetryableStatus(response.status) && attempt < OPENAI_CHAT_MAX_RETRIES) {
+        lastError = new Error(`OPENAI_CHAT_FAILED:${response.status}`);
+        await delay(OPENAI_CHAT_RETRY_DELAY_MS);
+        continue;
+      }
+      throw new Error(`OPENAI_CHAT_FAILED:${response.status}`);
+    }
+    const payload: any = await response.json();
+    const message = payload.choices?.[0]?.message;
+    if (!message) throw new Error('OPENAI_CHAT_EMPTY');
+    return {
+      configured: true,
+      message: { role: 'assistant', content: message.content ?? null, tool_calls: message.tool_calls },
+      usage: {
+        promptTokens: Number(payload.usage?.prompt_tokens || 0),
+        completionTokens: Number(payload.usage?.completion_tokens || 0),
+        totalTokens: Number(payload.usage?.total_tokens || 0),
+      },
+    };
+  }
+  throw lastError || new Error('OPENAI_CHAT_FAILED');
 }
 
 // ---------- The session ----------

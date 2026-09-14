@@ -24,6 +24,10 @@ const workerSource = await readFile(new URL('../worker.ts', import.meta.url), 'u
 const browserConfigGuard = await readFile(new URL('../scripts/assert-browser-config.mjs', import.meta.url), 'utf8');
 const fieldCompletionMigration = await readFile(new URL('../supabase/migrations/0022_field_completion_pack.sql', import.meta.url), 'utf8');
 const roleScopedPoliciesMigration = await readFile(new URL('../supabase/migrations/0028_field_completion_role_scoped_policies.sql', import.meta.url), 'utf8');
+const workspacesSource = await readFile(new URL('../server/routes/workspaces.ts', import.meta.url), 'utf8');
+const workspaceDeletionMigration = await readFile(new URL('../supabase/migrations/0030_workspace_deletion_lifecycle.sql', import.meta.url), 'utf8');
+const workspacePurgeSource = await readFile(new URL('../server/automation/workspacePurge.ts', import.meta.url), 'utf8');
+const automationRunnerSource = await readFile(new URL('../server/automation/runner.ts', import.meta.url), 'utf8');
 
 test('Stripe webhooks verify signatures against the raw body before claiming events', () => {
   assert.match(billingSource, /express\.raw\(\{\s*type: ["']application\/json["']/);
@@ -197,4 +201,86 @@ test('checklist, template and signature tables restrict writes to staff and abov
   assert.match(roleScopedPoliciesMigration, /array\[''owner'',''admin'',''manager'',''staff''\]::public\.workspace_role\[\]/);
   assert.match(roleScopedPoliciesMigration, /_staff_write/);
   assert.match(roleScopedPoliciesMigration, /checklist_templates.*job_checklists.*job_signatures|job_checklists.*job_signatures.*checklist_templates/s);
+});
+
+test('workspace deletion request and cancel are owner-only and require AAL2 step-up', () => {
+  const requestStart = workspacesSource.indexOf("router.post('/deletion/request'");
+  const requestEnd = workspacesSource.indexOf("router.post('/deletion/cancel'");
+  const requestRoute = workspacesSource.slice(requestStart, requestEnd);
+  assert.ok(requestStart >= 0, 'deletion/request route must exist');
+  assert.match(requestRoute, /requireRole\('owner'\)/);
+  assert.match(requestRoute, /requireSensitiveAuth/);
+  assert.match(requestRoute, /requireWorkspace/);
+
+  const cancelStart = requestEnd;
+  const cancelEnd = workspacesSource.indexOf("router.post('/deletion/request-account'");
+  const cancelRoute = workspacesSource.slice(cancelStart, cancelEnd);
+  assert.ok(cancelEnd > cancelStart, 'deletion/cancel route must exist');
+  assert.match(cancelRoute, /requireRole\('owner'\)/);
+  assert.match(cancelRoute, /requireSensitiveAuth/);
+  // Cancel must run before the pending-deletion workspace would otherwise be
+  // rejected by requireWorkspace -- it marks the request with
+  // allowPendingWorkspaceDeletion ahead of requireWorkspace in the chain.
+  assert.match(cancelRoute, /allowPendingWorkspaceDeletion,\s*requireWorkspace/);
+
+  // The self-service account-level path must never call deleteUser directly;
+  // it defers actual auth-account removal to the scheduled purge job.
+  const accountRoute = workspacesSource.slice(workspacesSource.indexOf("router.post('/deletion/request-account'"));
+  assert.doesNotMatch(accountRoute, /auth\.admin\.deleteUser/);
+  assert.match(accountRoute, /role === 'owner'/);
+});
+
+test('requireWorkspace treats a workspace with a pending deletion request as inaccessible for normal routes', () => {
+  const start = supabaseSource.indexOf('export async function requireWorkspace');
+  const end = supabaseSource.indexOf('export function allowPendingWorkspaceDeletion', start);
+  const tenantCheck = supabaseSource.slice(start, end);
+  assert.ok(end > start, 'allowPendingWorkspaceDeletion must be defined right after requireWorkspace');
+  assert.match(tenantCheck, /deletion_requested_at/);
+  assert.match(tenantCheck, /!req\.allowPendingWorkspaceDeletion/);
+  assert.match(tenantCheck, /res\.status\(410\)/);
+  assert.match(tenantCheck, /WORKSPACE_DELETION_PENDING/);
+
+  // allowPendingWorkspaceDeletion only flips a request-scoped flag -- it must
+  // never itself bypass the membership/role checks requireWorkspace and
+  // requireRole still perform.
+  const allowStart = end;
+  const allowEnd = supabaseSource.indexOf('export function requireRole', allowStart);
+  const allowFn = supabaseSource.slice(allowStart, allowEnd);
+  assert.match(allowFn, /req\.allowPendingWorkspaceDeletion = true/);
+  assert.doesNotMatch(allowFn, /workspace_members|supabaseAdmin/);
+});
+
+test('the scheduled purge job only touches workspaces past their scheduled_for date and outside a legal hold', () => {
+  assert.match(workspacePurgeSource, /legal_hold_active/);
+  assert.match(workspacePurgeSource, /\.eq\('legal_hold_active', false\)/);
+  assert.match(workspacePurgeSource, /\.lte\('deletion_scheduled_for', new Date\(\)\.toISOString\(\)\)/);
+  // Defensive re-check with the pure predicate, not just the query filters.
+  assert.match(workspacePurgeSource, /if \(!isEligibleForPurge\(row\)\) continue;/);
+  // Relies on the existing on-delete-cascade FKs rather than hand-written
+  // per-table cleanup.
+  assert.match(workspacePurgeSource, /\.from\('workspaces'\)\.delete\(\)\.eq\('id', workspace\.id\)/);
+  // The purge audit row is written before the delete, since audit_logs also
+  // cascades on workspace_id.
+  const auditAt = workspacePurgeSource.indexOf("action: 'workspace.purged'");
+  const deleteAt = workspacePurgeSource.indexOf(".from('workspaces').delete()");
+  assert.ok(auditAt >= 0 && deleteAt > auditAt, 'purge audit must be written before the workspace row is deleted');
+  // Owner account revocation only happens once no other owned workspace remains.
+  assert.match(workspacePurgeSource, /shouldRevokeOwnerAccount\(count \?\? 0\)/);
+  assert.match(workspacePurgeSource, /auth\.admin\.deleteUser/);
+});
+
+test('the deletion lifecycle migration adds paired, indexed columns and never reuses a bare deleted_at', () => {
+  assert.match(workspaceDeletionMigration, /deletion_requested_at timestamptz/);
+  assert.match(workspaceDeletionMigration, /deletion_scheduled_for timestamptz/);
+  assert.match(workspaceDeletionMigration, /create index workspaces_pending_deletion_idx/);
+  assert.match(workspaceDeletionMigration, /workspaces_deletion_pair_check/);
+  assert.doesNotMatch(workspaceDeletionMigration, /add column deleted_at/);
+});
+
+test('the workspace purge job runs on the same existing tick as the automation runner and the Cloudflare cron, rather than a new timer', () => {
+  assert.match(automationRunnerSource, /purgeScheduledWorkspaceDeletions/);
+  // Both jobs run from the single runSafely() tick, not a second setInterval.
+  const setIntervalCount = (automationRunnerSource.match(/setInterval/g) || []).length;
+  assert.equal(setIntervalCount, 1);
+  assert.match(workerSource, /purgeScheduledWorkspaceDeletions/);
 });

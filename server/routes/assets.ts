@@ -1,7 +1,7 @@
 // Assets & Service History: per-customer asset register with service tracking.
 import { Router } from 'express';
 import { z } from 'zod';
-import { asyncRoute, validateBody } from '../security';
+import { applyKeysetCursor, asyncRoute, buildPage, parseCursor, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest, writeAudit } from '../supabase';
 
 const router = Router();
@@ -21,11 +21,15 @@ const assetSchema = z.object({
 router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const customerId = String(req.query.customer_id || '');
-  let query = db.from('customer_assets').select('id,customer_id,name,asset_type,make,model,serial_number,installed_at,warranty_expires_at,created_at,updated_at,customers(display_name)').eq('workspace_id', req.workspaceId!).order('created_at', { ascending: false }).limit(200);
+  const limit = 200;
+  const cursor = parseCursor(req.query.cursor);
+  let query = db.from('customer_assets').select('id,customer_id,name,asset_type,make,model,serial_number,installed_at,warranty_expires_at,created_at,updated_at,customers(display_name)').eq('workspace_id', req.workspaceId!);
   if (customerId && /^[0-9a-f-]{36}$/i.test(customerId)) query = query.eq('customer_id', customerId);
-  const { data, error } = await query;
+  query = applyKeysetCursor(query, cursor);
+  const { data, error } = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
   if (error) return res.status(500).json({ error: 'ASSET_LIST_FAILED' });
-  res.json({ assets: data ?? [] });
+  const { page, nextCursor, hasMore } = buildPage(data ?? [], limit);
+  res.json({ assets: page, nextCursor, hasMore });
 }));
 
 router.post('/', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(assetSchema), asyncRoute(async (req: AuthenticatedRequest, res) => {

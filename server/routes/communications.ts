@@ -166,6 +166,13 @@ webhookRouter.post('/status', twilioSignatureGuard('/api/twilio/status'), asyncR
 
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('crm.core'));
 
+// NOT cursor-paginated: sorted by last_message_at (nulls last), a column
+// every inbound/outbound message mutates. A keyset cursor built on it would
+// silently and permanently drop every still-null conversation once a client
+// paged past the first page (NULL never satisfies a "less than" filter), and
+// a row's rank changes on every new message anyway, unlike an
+// append-only created_at order. Left on a fixed limit; the same shape
+// repeats at server/routes/intelligence.ts GET /conversations.
 router.get('/conversations', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const { data, error } = await db.from('conversations')

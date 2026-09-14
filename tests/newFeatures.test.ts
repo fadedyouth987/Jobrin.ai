@@ -6,6 +6,8 @@ import { dirname, join } from 'node:path';
 import { canDecideQuote, hashShareToken } from '../server/routes/public';
 import { canVoidQuote } from '../server/routes/operations';
 import { classifyAutomationStep, evaluateConditions, buildStepInput } from '../server/automation/runner';
+import { computeDeletionSchedule, WORKSPACE_DELETION_GRACE_DAYS } from '../server/routes/workspaces';
+import { isEligibleForPurge, shouldRevokeOwnerAccount } from '../server/automation/workspacePurge';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const source = (relative: string) => readFileSync(join(here, '..', relative), 'utf8');
@@ -268,4 +270,43 @@ test('approving an automation-step approval requeues its run; rejecting cancels 
   assert.match(runnerSource, /prior\?\.status === 'completed'/);
   assert.match(runnerSource, /prior\?\.status === 'awaiting_approval'/);
   assert.match(runnerSource, /APPROVAL_REJECTED/);
+});
+
+test('workspace deletion is scheduled exactly 30 days out and the schedule pairing is always both-or-neither', () => {
+  const before = Date.now();
+  const { requestedAt, scheduledFor } = computeDeletionSchedule(new Date(before));
+  assert.equal(WORKSPACE_DELETION_GRACE_DAYS, 30);
+  const deltaDays = (new Date(scheduledFor).getTime() - new Date(requestedAt).getTime()) / (24 * 60 * 60 * 1000);
+  assert.equal(deltaDays, 30);
+  assert.equal(new Date(requestedAt).getTime(), before);
+});
+
+test('a workspace is only purge-eligible once its scheduled date has passed and it carries no legal hold', () => {
+  const now = new Date('2026-10-01T00:00:00.000Z');
+  const past = new Date('2026-09-01T00:00:00.000Z').toISOString();
+  const future = new Date('2026-11-01T00:00:00.000Z').toISOString();
+
+  assert.equal(isEligibleForPurge({ deletion_scheduled_for: past, legal_hold_active: false }, now), true);
+  // Not due yet.
+  assert.equal(isEligibleForPurge({ deletion_scheduled_for: future, legal_hold_active: false }, now), false);
+  // Due, but a legal hold blocks the purge regardless of the date.
+  assert.equal(isEligibleForPurge({ deletion_scheduled_for: past, legal_hold_active: true }, now), false);
+  // No deletion requested at all.
+  assert.equal(isEligibleForPurge({ deletion_scheduled_for: null, legal_hold_active: false }, now), false);
+});
+
+test('the purged owner\'s auth account is only revoked once no other owned, active workspace remains', () => {
+  assert.equal(shouldRevokeOwnerAccount(0), true);
+  assert.equal(shouldRevokeOwnerAccount(1), false);
+  assert.equal(shouldRevokeOwnerAccount(3), false);
+});
+
+test('requesting account-level deletion never calls deleteUser directly and only touches owned workspaces', () => {
+  const workspacesSource = source('server/routes/workspaces.ts');
+  const routeAt = workspacesSource.indexOf("router.post('/deletion/request-account'");
+  assert.ok(routeAt >= 0);
+  const routeBody = workspacesSource.slice(routeAt);
+  assert.doesNotMatch(routeBody, /auth\.admin\.deleteUser/);
+  assert.match(routeBody, /role === 'owner'/);
+  assert.match(routeBody, /remainingMemberships/);
 });

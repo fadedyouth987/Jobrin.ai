@@ -20,7 +20,27 @@ export async function processBusinessBrainQueue(limit=5){
         const extraction=await extractMemoryCandidates({eventKey:feedback.event_key,proposal:feedback.proposal,finalValue:feedback.final_value,learningIntent:feedback.learning_intent,existingSummaries:existing??[]});
         if(!extraction.configured)throw new Error('OPENAI_NOT_CONFIGURED');
         for(const candidate of extraction.candidates){
-          const scopeId=candidate.scopeId??(candidate.scopeType==='workspace'?event.workspace_id:null);const decision=decideMemoryStatus({category:candidate.category,memoryKey:candidate.memoryKey,sampleCount:1,distinctRecords:1,explicitlyConfirmed:false,contradictionCount:candidate.conflictsWith.length,lastObservedAt:feedback.occurred_at});
+          const scopeId=candidate.scopeId??(candidate.scopeType==='workspace'?event.workspace_id:null);
+          // Find any prior observation of this exact memory (regardless of
+          // status) so a second corroborating candidate accumulates evidence
+          // instead of colliding with the unique(workspace_id,scope_type,
+          // scope_id,memory_key,status) constraint and being dropped.
+          let priorQuery=supabaseAdmin.from('business_memories').select('id,status,sample_count').eq('workspace_id',event.workspace_id).eq('scope_type',candidate.scopeType).eq('memory_key',candidate.memoryKey).in('status',['candidate','challenged']);
+          priorQuery=scopeId===null?priorQuery.is('scope_id',null):priorQuery.eq('scope_id',scopeId);
+          const{data:priorRows}=await priorQuery.limit(1);
+          const prior=priorRows?.[0];
+          if(prior){
+            const{data:evidenceRows}=await supabaseAdmin.from('memory_evidence').select('source_type,source_id').eq('workspace_id',event.workspace_id).eq('memory_id',prior.id);
+            const distinctKeys=new Set((evidenceRows??[]).map((row)=>`${row.source_type}:${row.source_id}`));distinctKeys.add(`${feedback.resource_type}:${feedback.resource_id}`);
+            const sampleCount=Number(prior.sample_count||0)+1;const distinctRecords=distinctKeys.size;
+            const decision=decideMemoryStatus({category:candidate.category,memoryKey:candidate.memoryKey,sampleCount,distinctRecords,explicitlyConfirmed:false,contradictionCount:candidate.conflictsWith.length,lastObservedAt:feedback.occurred_at});
+            const{error:evidenceError}=await supabaseAdmin.from('memory_evidence').insert({workspace_id:event.workspace_id,memory_id:prior.id,feedback_event_id:feedback.id,source_type:feedback.resource_type,source_id:feedback.resource_id,observed_value:feedback.final_value??feedback.proposal,weight:1,explicitly_confirmed:false,event_at:feedback.occurred_at});
+            if(evidenceError&&evidenceError.code!=='23505')throw new Error('MEMORY_EVIDENCE_STORE_FAILED');
+            await supabaseAdmin.from('business_memories').update({sample_count:sampleCount,status:decision.status,last_observed_at:feedback.occurred_at,updated_at:new Date().toISOString()}).eq('workspace_id',event.workspace_id).eq('id',prior.id);
+            if(decision.status!==prior.status)await supabaseAdmin.from('memory_promotion_decisions').insert({workspace_id:event.workspace_id,memory_id:prior.id,from_status:prior.status,to_status:decision.status,rule_key:decision.ruleKey,rule_version:MEMORY_RULE_VERSION,inputs:{sampleCount,distinctRecords,contradictions:candidate.conflictsWith},reason:decision.reason,actor_type:'deterministic_worker'});
+            continue;
+          }
+          const decision=decideMemoryStatus({category:candidate.category,memoryKey:candidate.memoryKey,sampleCount:1,distinctRecords:1,explicitlyConfirmed:false,contradictionCount:candidate.conflictsWith.length,lastObservedAt:feedback.occurred_at});
           const{data:memory,error:memoryError}=await supabaseAdmin.from('business_memories').insert({workspace_id:event.workspace_id,scope_type:candidate.scopeType,scope_id:scopeId,category:candidate.category,memory_key:candidate.memoryKey,structured_value:candidate.structuredValue,summary:candidate.summary,status:decision.status,confidence:.2,sample_count:1,sensitivity:candidate.sensitivity,source_type:'ai_feedback',provenance:{feedbackEventId:feedback.id,reason:candidate.reason,responseId:extraction.responseId},first_observed_at:feedback.occurred_at,last_observed_at:feedback.occurred_at,algorithm_version:MEMORY_RULE_VERSION,prompt_version:feedback.prompt_version}).select('id').single();
           if(memoryError){if(memoryError.code==='23505')continue;throw new Error('MEMORY_CANDIDATE_STORE_FAILED');}
           await supabaseAdmin.from('memory_evidence').insert({workspace_id:event.workspace_id,memory_id:memory.id,feedback_event_id:feedback.id,source_type:feedback.resource_type,source_id:feedback.resource_id,observed_value:feedback.final_value??feedback.proposal,weight:1,explicitly_confirmed:false,event_at:feedback.occurred_at});

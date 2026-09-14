@@ -3,6 +3,7 @@ import { app, finalizeApp } from './server';
 import { env } from './server/env';
 import { processBusinessBrainQueue } from './server/ai/businessBrainWorker';
 import { processAutomationRuns } from './server/automation/runner';
+import { purgeScheduledWorkspaceDeletions } from './server/automation/workspacePurge';
 import { markReceptionistEngineAttached, verifyCallToken } from './server/ai/receptionistCall';
 import { ReceptionistCallDO } from './server/ai/receptionistDO';
 import { openaiConfigured } from './server/providers/openai';
@@ -58,6 +59,7 @@ export default {
     const jobs: Promise<unknown>[] = [];
     if (env.SUPABASE_SERVICE_ROLE_KEY && openaiConfigured()) jobs.push(processBusinessBrainQueue());
     if (env.SUPABASE_SERVICE_ROLE_KEY) jobs.push(processAutomationRuns());
+    if (env.SUPABASE_SERVICE_ROLE_KEY) jobs.push(purgeScheduledWorkspaceDeletions());
     if (jobs.length) {
       // The queues use atomic claims and idempotency keys, so Cloudflare's
       // at-least-once cron delivery cannot duplicate a memory extraction or an
