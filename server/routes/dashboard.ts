@@ -13,6 +13,8 @@ router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const startToday = new Date(now); startToday.setHours(0,0,0,0);
   const endToday = new Date(startToday); endToday.setDate(endToday.getDate() + 1);
 
+  const startOfWeek = new Date(startToday); startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+
   const [
     leads,
     customers,
@@ -25,6 +27,8 @@ router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
     overdueInvoices,
     unscheduledJobs,
     pendingApprovals,
+    recentAiActions,
+    weekActivity,
   ] = await Promise.all([
     db.from('leads').select('id,stage', { count: 'exact' }).eq('workspace_id', workspaceId).is('deleted_at', null),
     db.from('customers').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId).is('deleted_at', null),
@@ -37,9 +41,11 @@ router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
     db.from('invoices').select('id,invoice_number,balance_due_cents,due_at,customer_id,customers(display_name)').eq('workspace_id', workspaceId).in('status', ['sent','viewed','part_paid','overdue']).lt('due_at', now.toISOString()).order('due_at').limit(10),
     db.from('jobs').select('id,title,status,customer_id,customers(display_name)').eq('workspace_id', workspaceId).in('status', ['new','scheduled']).is('scheduled_start', null).order('created_at').limit(10),
     db.from('approvals').select('id,resource_type,reason,created_at').eq('workspace_id', workspaceId).eq('status', 'pending').order('created_at').limit(10),
+    db.from('ai_actions').select('id,tool_name,status,created_at,customer_id,customers(display_name)').eq('workspace_id', workspaceId).order('created_at', { ascending: false }).limit(6),
+    db.from('leads').select('id,created_at').eq('workspace_id', workspaceId).gte('created_at', startOfWeek.toISOString()),
   ]);
 
-  const fail = [leads.error,customers.error,jobCount.error,todaysJobs.error,openQuotes.error,outstandingInvoices.error,revenue.error,aiActions.error,overdueInvoices.error,unscheduledJobs.error,pendingApprovals.error].find(Boolean);
+  const fail = [leads.error,customers.error,jobCount.error,todaysJobs.error,openQuotes.error,outstandingInvoices.error,revenue.error,aiActions.error,overdueInvoices.error,unscheduledJobs.error,pendingApprovals.error,recentAiActions.error,weekActivity.error].find(Boolean);
   if (fail) return res.status(500).json({ error: 'DASHBOARD_READ_FAILED' });
 
   const leadRows = leads.data ?? [];
@@ -47,6 +53,19 @@ router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const bookedLeads = leadRows.filter((l: any) => ['booked','won','completed'].includes(l.stage)).length;
   const outstandingCents = (outstandingInvoices.data ?? []).reduce((sum: number, row: any) => sum + Number(row.balance_due_cents || 0), 0);
   const monthRevenueCents = (revenue.data ?? []).reduce((sum: number, row: any) => sum + Number(row.amount_cents || 0), 0);
+  const openQuotesCents = (openQuotes.data ?? []).reduce((sum: number, row: any) => sum + Number(row.total_cents || 0), 0);
+  const overdueCents = (overdueInvoices.data ?? []).reduce((sum: number, row: any) => sum + Number(row.balance_due_cents || 0), 0);
+
+  // Seven daily buckets (oldest first) of lead/enquiry volume this week — the
+  // trace behind the "Jobryn Pulse" strip, not a generic chart library.
+  const pulse = Array.from({ length: 7 }, (_, day) => {
+    const bucketStart = new Date(startOfWeek); bucketStart.setDate(bucketStart.getDate() + day);
+    const bucketEnd = new Date(bucketStart); bucketEnd.setDate(bucketEnd.getDate() + 1);
+    return (weekActivity.data ?? []).filter((row: any) => {
+      const at = new Date(row.created_at);
+      return at >= bucketStart && at < bucketEnd;
+    }).length;
+  });
 
   res.json({
     metrics: {
@@ -56,10 +75,14 @@ router.get('/', asyncRoute(async (req: AuthenticatedRequest, res) => {
       newLeads,
       bookedLeads,
       openQuotes: openQuotes.count ?? 0,
+      openQuotesCents,
       outstandingCents,
+      overdueCents,
       monthRevenueCents,
       aiActions: aiActions.count ?? 0,
     },
+    pulse,
+    aiActivity: (recentAiActions.data ?? []).map((row: any) => ({ id: row.id, tool: row.tool_name, status: row.status, at: row.created_at, customer: row.customers?.display_name ?? null })),
     today: todaysJobs.data ?? [],
     attention: [
       ...(leadRows.filter((lead: any) => lead.stage === 'new').slice(0, 10).map((lead: any) => ({ id: `lead:${lead.id}`, kind: 'lead', tone: 'indigo', title: 'New lead needs a response', description: 'Open the lead and make contact while the enquiry is fresh.', href: '/app/leads' }))),

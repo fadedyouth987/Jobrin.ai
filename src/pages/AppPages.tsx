@@ -17,8 +17,112 @@ function useData<T>(path: string, initial: T) {
   return {data,loading,error,refresh};
 }
 
+// --- Jobryn Pulse: a single instrument strip (not four floating stat cards) —
+// segments read left-to-right by urgency, with a real 7-day activity trace
+// underneath rather than a generic bar/line chart. See ADVERSARIAL_UX_REVIEW.
+function PulseTrace({ values }: { values: number[] }) {
+  const w=280,h=28,pad=3; const max=Math.max(1,...values);
+  const pt=(i:number,v:number)=>{const x=pad+(i*(w-pad*2))/Math.max(1,values.length-1);const y=h-pad-(v/max)*(h-pad*2);return [x,y] as const;};
+  const points=values.map((v,i)=>pt(i,v).join(',')).join(' ');
+  return <svg viewBox={`0 0 ${w} ${h}`} className="h-7 w-full max-w-xs text-indigo-500" preserveAspectRatio="none" aria-hidden="true">
+    <polyline points={points} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    {values.map((v,i)=>{const [x,y]=pt(i,v);return <circle key={i} cx={x} cy={y} r="2" fill="currentColor"/>;})}
+  </svg>;
+}
+function PulseSegment({label,value,note,urgent}:{label:string;value:React.ReactNode;note?:string;urgent?:boolean}) {
+  return <div className={`flex-1 min-w-[8rem] p-4 ${urgent?'border-l-4 border-red-400 bg-red-50/40':''}`}>
+    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+    <p className="mt-1 text-2xl font-black tracking-tight text-slate-950">{value}</p>
+    {note&&<p className="mt-1 text-[11px] leading-4 text-slate-400">{note}</p>}
+  </div>;
+}
+function JobrynPulse({metrics,pulse,stripeConfigured,openaiConfigured}:{metrics:any;pulse:number[];stripeConfigured:boolean;openaiConfigured:boolean}) {
+  return <div className="mb-6 overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <div className="flex flex-wrap divide-x divide-slate-100">
+      <PulseSegment label="This month" value={<Money cents={metrics.monthRevenueCents||0}/>} note={stripeConfigured?'received':'connect Stripe to record payments'}/>
+      <PulseSegment label="Outstanding" value={<Money cents={metrics.outstandingCents||0}/>} note={(metrics.overdueCents||0)>0?`incl. ${new Intl.NumberFormat('en-AU',{style:'currency',currency:'AUD',maximumFractionDigits:0}).format(metrics.overdueCents/100)} overdue`:'across open invoices'} urgent={(metrics.overdueCents||0)>0}/>
+      <PulseSegment label="New leads" value={String(metrics.newLeads||0)} note="waiting on a first reply" urgent={(metrics.newLeads||0)>0}/>
+      <PulseSegment label="AI actions" value={String(metrics.aiActions||0)} note={openaiConfigured?'this month':'connect OpenAI to activate'}/>
+    </div>
+    <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-3">
+      <PulseTrace values={pulse.length?pulse:[0,0,0,0,0,0,0]}/>
+      <p className="mt-1 text-[11px] text-slate-400">New enquiries by day, this week — the pulse of the business</p>
+    </div>
+  </div>;
+}
+
+// --- Revenue Flow: money shown moving through real pipeline stages, not
+// three disconnected totals.
+function RevenueFlow({metrics}:{metrics:any}) {
+  const stages=[
+    {label:'Quoted',sub:'Awaiting a decision',cents:metrics.openQuotesCents||0},
+    {label:'Outstanding',sub:(metrics.overdueCents||0)>0?'Some invoices are overdue':'Invoiced, not yet paid',cents:metrics.outstandingCents||0,urgent:(metrics.overdueCents||0)>0},
+    {label:'Received',sub:'Paid this month',cents:metrics.monthRevenueCents||0},
+  ];
+  return <Card className="mb-6 p-5">
+    <h2 className="mb-4 font-bold">Revenue flow</h2>
+    <div className="flex flex-wrap items-stretch gap-2">
+      {stages.map((stage,i)=><React.Fragment key={stage.label}>
+        <div className={`min-w-[9rem] flex-1 rounded-lg p-3.5 ${stage.urgent?'border-l-4 border-red-400 bg-red-50/50':'bg-slate-50'}`}>
+          <p className="text-xs font-semibold text-slate-500">{stage.label}</p>
+          <p className="mt-1 text-xl font-black tracking-tight"><Money cents={stage.cents}/></p>
+          <p className="mt-0.5 text-[11px] text-slate-400">{stage.sub}</p>
+        </div>
+        {i<stages.length-1&&<div className="flex flex-none items-center text-slate-300"><ArrowRight className="h-4 w-4"/></div>}
+      </React.Fragment>)}
+    </div>
+  </Card>;
+}
+
+// --- Decision Queue (was "Needs attention"): urgency is structural (a left
+// border, a type icon, a specific action label) instead of a same-shaped
+// pill on every row regardless of stakes.
+const attentionKindMeta:Record<string,{icon:any;action:string}>={
+  lead:{icon:BriefcaseBusiness,action:'Reply now'},
+  invoice:{icon:ReceiptText,action:'Chase payment'},
+  job:{icon:Calendar,action:'Schedule now'},
+  approval:{icon:ShieldCheck,action:'Review'},
+};
+function DecisionQueue({items}:{items:any[]}) {
+  if(!items.length)return <EmptyState title="You're caught up" description="No new leads, overdue invoices, unscheduled jobs or approvals waiting."/>;
+  return <div className="space-y-2">{items.map((item:any)=>{
+    const meta=attentionKindMeta[item.kind]||{icon:AlertTriangle,action:'Open'};
+    const Icon=meta.icon;
+    const border=item.tone==='red'?'border-red-400':item.tone==='amber'?'border-amber-400':'border-indigo-400';
+    return <AppLink key={item.id} href={item.href} className={`flex items-center gap-3 rounded-lg border-l-4 ${border} bg-white p-3 shadow-sm transition hover:bg-slate-50`}>
+      <span className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-slate-100 text-slate-600"><Icon className="h-4 w-4"/></span>
+      <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-900">{item.title}</span><span className="mt-0.5 block text-xs leading-5 text-slate-500">{item.description}</span></span>
+      <span className="flex-none text-xs font-bold text-indigo-600">{meta.action}</span>
+    </AppLink>;
+  })}</div>;
+}
+
+// --- AI Activity: what the AI actually did, in plain language, instead of a
+// bare "AI actions: N" count — makes the work visible rather than magical.
+function formatToolName(tool:string) {
+  const labels:Record<string,string>={take_message:'Took a message',request_handoff:'Requested a handoff'};
+  return labels[tool]||tool.replace(/_/g,' ').replace(/^\w/,(c)=>c.toUpperCase());
+}
+function timeAgo(iso:string) {
+  const mins=Math.round((Date.now()-new Date(iso).getTime())/60000);
+  if(mins<1)return 'just now'; if(mins<60)return `${mins}m ago`;
+  const hrs=Math.round(mins/60); if(hrs<24)return `${hrs}h ago`;
+  return `${Math.round(hrs/24)}d ago`;
+}
+function AIActivityFeed({items}:{items:any[]}) {
+  if(!items.length)return <p className="text-sm text-slate-400">No AI activity yet — it will appear here the moment the receptionist takes an action.</p>;
+  return <div className="space-y-1.5">{items.map((item:any)=>{
+    const dot=item.status==='completed'?'bg-emerald-500':item.status==='failed'||item.status==='denied'?'bg-red-500':item.status==='awaiting_approval'?'bg-amber-500':'bg-slate-400';
+    return <div key={item.id} className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+      <span className={`h-2 w-2 flex-none rounded-full ${dot}`}/>
+      <span className="min-w-0 flex-1 truncate text-slate-700">{formatToolName(item.tool)}{item.customer?` · ${item.customer}`:''}</span>
+      <span className="flex-none text-[11px] text-slate-400">{timeAgo(item.at)}</span>
+    </div>;
+  })}</div>;
+}
+
 export function DashboardPage() {
-  const query=useData<any>('/api/dashboard',{metrics:{},today:[],attention:[]});
+  const query=useData<any>('/api/dashboard',{metrics:{},today:[],attention:[],pulse:[],aiActivity:[]});
   const onboarding=useData<any>('/api/workspaces/onboarding',{steps:[]});
   const billing=useData<any>('/api/billing/status',{subscription:null,entitlements:[],stripeConfigured:false});
   const integrations=useData<any>('/api/integrations',{integrations:[],readiness:{}});
@@ -36,13 +140,16 @@ export function DashboardPage() {
     {label:'Connect Twilio (text customers)',description:'The SMS inbox, campaigns and the AI receptionist all run on your Twilio number.',href:'/app/integrations',done:(integrations.data.integrations||[]).some((i:any)=>i.provider==='twilio'&&i.status==='connected')},
     {label:'Set up email delivery',description:'Quotes and invoices emailed straight to customers with a payment link.',href:'/app/integrations',done:integrations.data.readiness?.email===true},
   ];
-  const cards=[
-    {label:'Revenue this month',value:<Money cents={m.monthRevenueCents||0}/>,sub:'Payments received in the calendar month',icon:<CircleDollarSign className="h-4 w-4"/>,pendingNote:billing.data.stripeConfigured?undefined:'This stays $0 until Stripe is connected under Billing — connect it to record payments.'},
-    {label:'Outstanding',value:<Money cents={m.outstandingCents||0}/>,sub:'Still owed across open invoices',icon:<ReceiptText className="h-4 w-4"/>,pendingNote:undefined},
-    {label:'New leads',value:String(m.newLeads||0),sub:'Waiting for a first response',icon:<BriefcaseBusiness className="h-4 w-4"/>,pendingNote:undefined},
-    {label:'AI actions',value:String(m.aiActions||0),sub:'Controlled Operator activity this month',icon:<Bot className="h-4 w-4"/>,pendingNote:(integrations.data.readiness as any)?.openai?undefined:'This stays at 0 until OpenAI is configured on the server — AI Admin turns are metered once live.'},
-  ];
-  return <Page title="Today" eyebrow="Run the business" description="Your live snapshot: what the business earned, who needs a reply and what is booked today. Everything links straight to the record so you can act in one click." action={<SecondaryButton onClick={()=>query.refresh()}><RefreshCcw className="mr-2 inline h-4 w-4"/>Refresh</SecondaryButton>}><SetupChecklist description="Work through these steps and Jobrin.ai is ready to run real work." items={setupItems}/><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{cards.map((card)=><StatCard key={String(card.label)} icon={card.icon} label={card.label} value={card.value} sub={card.sub} pendingNote={card.pendingNote}/>)}</div><div className="mt-6 grid gap-6 xl:grid-cols-[.85fr_1.15fr]"><Card className="p-5"><div className="mb-4"><h2 className="font-bold">Needs attention</h2><p className="text-xs text-slate-500">The most useful next actions across this workspace</p></div>{query.data.attention?.length?<div className="space-y-2">{query.data.attention.map((item:any)=><AppLink key={item.id} href={item.href} className="flex items-start gap-3 rounded-xl border border-slate-100 p-3 transition hover:border-indigo-200 hover:bg-indigo-50/40"><span className={`mt-1.5 h-2.5 w-2.5 flex-none rounded-full ${item.tone==='red'?'bg-red-500':item.tone==='amber'?'bg-amber-500':'bg-indigo-500'}`}/><div className="min-w-0 flex-1"><p className="text-sm font-semibold">{item.title}</p><p className="mt-0.5 text-xs leading-5 text-slate-500">{item.description}</p></div><ArrowRight className="mt-1 h-4 w-4 text-slate-400"/></AppLink>)}</div>:<EmptyState title="You're caught up" description="There are no new leads, overdue invoices, unscheduled jobs or approvals waiting."/>}</Card><Card className="p-5"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold">Today's work</h2><p className="text-xs text-slate-500">Scheduled jobs in this workspace</p></div><AppLink href="/app/schedule" className="text-xs font-semibold text-indigo-600">Open schedule</AppLink></div>{query.data.today?.length?<div className="space-y-2">{query.data.today.map((job:any)=><AppLink href={`/app/jobs/${job.id}`} key={job.id} className="flex items-center gap-3 rounded-xl border border-slate-100 p-3 transition hover:border-indigo-200"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100"><Calendar className="h-4 w-4"/></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{job.title}</p><p className="text-xs text-slate-500">{job.customers?.display_name||'Customer'} · {job.scheduled_start?new Date(job.scheduled_start).toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit'}):'Time pending'}</p></div><StatusPill>{job.status}</StatusPill></AppLink>)}</div>:<EmptyState title="Nothing scheduled today" description="Use Schedule to plan work, or open an unscheduled job from the attention list."/>}</Card></div></Page>;
+  return <Page title="Today" eyebrow="Run the business" description="Your live snapshot: what the business earned, who needs a reply and what is booked today. Everything links straight to the record so you can act in one click." action={<SecondaryButton onClick={()=>query.refresh()}><RefreshCcw className="mr-2 inline h-4 w-4"/>Refresh</SecondaryButton>}>
+    <SetupChecklist description="Work through these steps and Jobrin.ai is ready to run real work." items={setupItems}/>
+    <JobrynPulse metrics={m} pulse={query.data.pulse||[]} stripeConfigured={billing.data.stripeConfigured===true} openaiConfigured={(integrations.data.readiness as any)?.openai===true}/>
+    <RevenueFlow metrics={m}/>
+    <div className="grid gap-6 xl:grid-cols-[.85fr_1.15fr]">
+      <Card className="p-5"><div className="mb-4"><h2 className="font-bold">Decision queue</h2><p className="text-xs text-slate-500">The most useful next actions across this workspace</p></div><DecisionQueue items={query.data.attention||[]}/></Card>
+      <Card className="p-5"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold">Today's work</h2><p className="text-xs text-slate-500">Scheduled jobs in this workspace</p></div><AppLink href="/app/schedule" className="text-xs font-semibold text-indigo-600">Open schedule</AppLink></div>{query.data.today?.length?<div className="space-y-2">{query.data.today.map((job:any)=><AppLink href={`/app/jobs/${job.id}`} key={job.id} className="flex items-center gap-3 rounded-xl border border-slate-100 p-3 transition hover:border-indigo-200"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100"><Calendar className="h-4 w-4"/></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{job.title}</p><p className="text-xs text-slate-500">{job.customers?.display_name||'Customer'} · {job.scheduled_start?new Date(job.scheduled_start).toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit'}):'Time pending'}</p></div><StatusPill>{job.status}</StatusPill></AppLink>)}</div>:<EmptyState title="Nothing scheduled today" description="Use Schedule to plan work, or open an unscheduled job from the decision queue."/>}</Card>
+    </div>
+    <Card className="mt-6 p-5"><div className="mb-4"><h2 className="font-bold">AI activity</h2><p className="text-xs text-slate-500">What the receptionist has actually done — not a magic number</p></div><AIActivityFeed items={query.data.aiActivity||[]}/></Card>
+  </Page>;
 }
 
 export function CommandCentrePage() {
