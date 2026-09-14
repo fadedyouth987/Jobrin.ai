@@ -609,6 +609,11 @@ export const COMING_SOON_FEATURES: Record<string, { title: string; eyebrow: stri
     description: 'Connect Jobrin.ai to anything: Zapier, webhooks and a documented API — leads in from your website, events out to your other tools.',
     points: ['Outbound webhooks on key events', 'Documented API with workspace keys', 'Zapier triggers for leads, jobs and payments'],
   },
+  'review-automation': {
+    title: 'Automated review requests', eyebrow: 'Marketing & Reviews',
+    description: 'After a job is marked done, an automated request goes out asking for a review — with delivery tracking and the customer\'s response captured against the job.',
+    points: ['Triggered automatically when a job completes', 'Delivery and click tracking', 'Customer responses captured against the job record'],
+  },
   'deploy-health': {
     title: 'Deployment health & monitoring', eyebrow: 'Settings & Security',
     description: 'Live status of your deployment: uptime, error rates, backup schedule and rollback readiness — so you always know the platform is healthy.',

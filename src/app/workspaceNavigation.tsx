@@ -17,6 +17,7 @@ import { BusinessBrainPage } from '../pages/BusinessBrainPage';
 import { HiringPage } from '../pages/HiringPage';
 import { IntegrationsPage } from '../pages/IntegrationsPage';
 import { CustomerDetailPage, JobDetailPage } from '../pages/OperationalDetailPages';
+import { RecurringJobsPage, TimeMaterialsLogPage } from '../pages/FieldOpsPages';
 import { SchedulePage } from '../pages/SchedulePage';
 
 export type NavItem = [string, string, React.ComponentType<{ className?: string }>, boolean?];
@@ -39,7 +40,6 @@ export const workspaceNavGroups: NavGroup[] = [
   ]},
   { label:'Jobs', items:[
     ['/app/jobs','Jobs',FileCheck2],
-    ['/app/coming-soon/job-checklists','Job checklists & badges',ClipboardList,true],
   ]},
   { label:'Quotes & Invoices', items:[
     ['/app/quotes','Quotes',FileText],
@@ -48,10 +48,10 @@ export const workspaceNavGroups: NavGroup[] = [
     ['/app/coming-soon/pdf-documents','PDF documents',FileText,true],
   ]},
   { label:'Field Operations', items:[
-    ['/app/coming-soon/time-materials','Time & Materials log',Clock3,true],
+    ['/app/time-materials','Time & Materials log',Clock3],
     ['/app/coming-soon/checklists-forms','Checklists & forms',ClipboardList,true],
     ['/app/assets','Assets & service history',Package],
-    ['/app/coming-soon/recurring-jobs','Recurring jobs & agreements',Repeat,true],
+    ['/app/recurring-jobs','Recurring jobs & agreements',Repeat],
     ['/app/coming-soon/supplier-purchasing','Supplier purchasing',Package,true],
   ]},
   { label:'AI Admin', items:[
@@ -124,6 +124,8 @@ export function routeWorkspacePage(path: string) {
   if (path === '/app/inbox') return <InboxPage/>;
   if (path === '/app/notifications') return <NotificationsPage/>;
   if (path === '/app/assets') return <AssetsPage/>;
+  if (path === '/app/time-materials') return <TimeMaterialsLogPage/>;
+  if (path === '/app/recurring-jobs') return <RecurringJobsPage/>;
   if (path === '/app/capabilities') return <CapabilityMapPage/>;
   if (path === '/app/marketing') return <MarketingPage/>;
   if (path === '/app/hiring') return <HiringPage/>;
