@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useEffect } from "react";
 import { AuthProvider, useAuth } from "./app/auth";
 import { navigate, usePathname } from "./app/router";
+import { ToastProvider } from "./components/saas/ui";
 
 // Keep the public first paint lean: the full authenticated operations suite is
 // downloaded only after an authorised person enters the workspace.
@@ -41,17 +42,19 @@ const AppShell = lazy(() => import("./pages/AppShell"));
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Suspense
-        fallback={
-          <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
-            Loading Jobrin.ai…
-          </div>
-        }
-      >
-        <Routes />
-      </Suspense>
-    </AuthProvider>
+    <ToastProvider>
+      <AuthProvider>
+        <Suspense
+          fallback={
+            <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
+              Loading Jobrin.ai…
+            </div>
+          }
+        >
+          <Routes />
+        </Suspense>
+      </AuthProvider>
+    </ToastProvider>
   );
 }
 
