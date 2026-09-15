@@ -1,5 +1,15 @@
 import React, { useEffect, useState } from "react";
-import { CheckCircle2, ExternalLink, PlugZap, RefreshCcw } from "lucide-react";
+import {
+  Bot,
+  CheckCircle2,
+  ChevronDown,
+  CreditCard,
+  ExternalLink,
+  Mail,
+  Phone,
+  PlugZap,
+  RefreshCcw,
+} from "lucide-react";
 import { useAuth } from "../app/auth";
 import { AppLink } from "../app/router";
 import { apiFetch } from "../lib/api";
@@ -64,6 +74,72 @@ const providers = [
     "/app/coming-soon/zapier-api",
   ],
 ] as const;
+
+const everydayTools = [
+  {
+    key: "payments",
+    title: "Take payments",
+    description:
+      "Send invoices with secure payment links. Customers pay through a hosted checkout, so card details stay out of Jobrin.ai.",
+    readiness: "stripe",
+    icon: CreditCard,
+    href: "/app/billing",
+  },
+  {
+    key: "phone",
+    title: "Business phone and texts",
+    description:
+      "Route calls and SMS into this workspace using managed business numbers.",
+    readiness: "twilio",
+    icon: Phone,
+    href: null,
+  },
+  {
+    key: "email",
+    title: "Send quotes and invoices",
+    description:
+      "Email customer documents and payment links directly from Jobrin.ai.",
+    readiness: "email",
+    icon: Mail,
+    href: null,
+  },
+  {
+    key: "ai",
+    title: "AI receptionist and admin",
+    description:
+      "Use approved business facts to answer calls, draft replies and prepare controlled admin work.",
+    readiness: "openai",
+    icon: Bot,
+    href: null,
+  },
+] as const;
+
+function AdvancedPanel({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="group rounded-lg border border-slate-200 bg-white">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4">
+        <span>
+          <span className="block text-sm font-bold text-slate-950">
+            {title}
+          </span>
+          <span className="mt-0.5 block text-xs leading-5 text-slate-500">
+            {description}
+          </span>
+        </span>
+        <ChevronDown className="h-4 w-4 flex-none text-slate-400 transition group-open:rotate-180" />
+      </summary>
+      <div className="border-t border-slate-100 p-5">{children}</div>
+    </details>
+  );
+}
 
 export function IntegrationsPage() {
   const { workspaceId } = useAuth();
@@ -186,15 +262,15 @@ export function IntegrationsPage() {
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-[.18em] text-indigo-600">
-            Provider health
+            Connected tools
           </p>
           <h1 className="mt-1 text-3xl font-black tracking-tight">
             Integrations
           </h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-            Configured means valid server-side credentials are present.
-            Connected means the provider is also assigned to this workspace.
-            Roadmap providers remain visibly unavailable.
+            Start with the business tools people actually use. Provider names,
+            API keys and webhook details are kept in Advanced setup for the
+            people who need them.
           </p>
         </div>
         <SecondaryButton onClick={() => void load()}>
@@ -207,7 +283,62 @@ export function IntegrationsPage() {
           {error}
         </div>
       )}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {everydayTools.map((tool) => {
+          const ready =
+            tool.readiness === "twilio"
+              ? byProvider.get("twilio")?.status === "connected"
+              : data.readiness[tool.readiness];
+          const Icon = tool.icon;
+          const card = (
+            <Card className="h-full p-5 transition hover:border-indigo-300">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <StatusPill tone={ready ? "green" : "slate"}>
+                  {ready ? "ready" : "setup later"}
+                </StatusPill>
+              </div>
+              <h2 className="mt-4 font-bold">{tool.title}</h2>
+              <p className="mt-1 text-sm leading-6 text-slate-500">
+                {tool.description}
+              </p>
+            </Card>
+          );
+          return tool.href ? (
+            <AppLink key={tool.key} href={tool.href} className="block">
+              {card}
+            </AppLink>
+          ) : (
+            <div key={tool.key}>{card}</div>
+          );
+        })}
+      </div>
+
+      <Card className="mt-5 p-5">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+            <CheckCircle2 className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="font-bold">Managed by Jobrin.ai by default</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              Customers should not need their own payment, SMS, email or AI
+              accounts to get started. Use advanced options only when a
+              business has its own provider account or a special compliance
+              requirement.
+            </p>
+          </div>
+        </div>
+      </Card>
+
+      <div className="mt-5">
+        <AdvancedPanel
+          title="Advanced setup"
+          description="Provider health, API-backed features and roadmap integrations."
+        >
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {providers.map(([key, name, description, href]) => {
           const record = byProvider.get(key);
           const supportsReadiness = key in data.readiness;
@@ -275,22 +406,21 @@ export function IntegrationsPage() {
             </Card>
           );
         })}
+          </div>
+        </AdvancedPanel>
       </div>
 
       <div className="mt-10">
         <p className="text-xs font-bold uppercase tracking-[.18em] text-indigo-600">
-          Twilio
+          Business phone
         </p>
         <h2 className="mt-1 text-xl font-black tracking-tight">
           Phone numbers
         </h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-          Every number below routes inbound calls and SMS to this workspace.
-          A number without an override uses the workspace's default
-          receptionist settings; give it its own greeting or voice on the
-          receptionist page to make it sound different. The number must
-          already exist in your Twilio account with its voice webhook
-          pointed at this app before adding it here.
+          Every number below routes customer calls and SMS to this workspace.
+          Most teams only need to know which number is active; provider setup
+          details are tucked away below.
         </p>
         {numbersError && (
           <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -300,8 +430,8 @@ export function IntegrationsPage() {
         <Card className="mt-4 p-5">
           {numbers.length === 0 ? (
             <p className="text-sm text-slate-500">
-              No phone numbers yet. Activate Twilio above, or add a number
-              below.
+              No phone numbers yet. A managed business number can be assigned
+              during setup, or an existing provider number can be added below.
             </p>
           ) : (
             <div className="divide-y divide-slate-100">
@@ -346,35 +476,46 @@ export function IntegrationsPage() {
               ))}
             </div>
           )}
-          <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-slate-100 pt-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-500">
-                Phone number (E.164, e.g. +61491234567)
-              </label>
-              <input
-                className="mt-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                value={newNumber}
-                onChange={(event) => setNewNumber(event.target.value)}
-                placeholder="+61491234567"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500">
-                Label
-              </label>
-              <input
-                className="mt-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                value={newLabel}
-                onChange={(event) => setNewLabel(event.target.value)}
-                placeholder="e.g. Northside branch"
-              />
-            </div>
-            <PrimaryButton
-              disabled={numbersBusy || !newNumber.trim()}
-              onClick={() => void addNumber()}
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <AdvancedPanel
+              title="Add an existing provider number"
+              description="For teams that already have a connected business number."
             >
-              {numbersBusy ? "Adding…" : "Add number"}
-            </PrimaryButton>
+              <p className="mb-4 text-xs leading-5 text-slate-500">
+                The number must already exist in the managed phone provider
+                with its voice and messaging webhooks pointed at this app.
+              </p>
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500">
+                    Phone number (E.164, e.g. +61491234567)
+                  </label>
+                  <input
+                    className="mt-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    value={newNumber}
+                    onChange={(event) => setNewNumber(event.target.value)}
+                    placeholder="+61491234567"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500">
+                    Label
+                  </label>
+                  <input
+                    className="mt-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    value={newLabel}
+                    onChange={(event) => setNewLabel(event.target.value)}
+                    placeholder="e.g. Northside branch"
+                  />
+                </div>
+                <PrimaryButton
+                  disabled={numbersBusy || !newNumber.trim()}
+                  onClick={() => void addNumber()}
+                >
+                  {numbersBusy ? "Adding…" : "Add number"}
+                </PrimaryButton>
+              </div>
+            </AdvancedPanel>
           </div>
         </Card>
       </div>

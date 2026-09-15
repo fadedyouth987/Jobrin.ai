@@ -3,11 +3,11 @@ import {
   Activity, BarChart3, Bell, Bot, Brain, BriefcaseBusiness, Calculator, CalendarDays, Clock3,
   CircleDollarSign, ClipboardList, ContactRound, CreditCard, FileCheck2, FileText, Globe,
   Home, Inbox, LibraryBig, MapPin, MessageSquareMore, Package, Phone,
-  PhoneCall, PlugZap, ReceiptText, Repeat, Settings, ShieldAlert, ShieldCheck, Sparkles, Star,
+  PhoneCall, PlugZap, ReceiptText, Repeat, Settings, ShieldAlert, ShieldCheck, Star,
   Truck, UserRoundPlus, Users, Voicemail, Workflow,
 } from 'lucide-react';
 import {
-  AnalyticsPage, ApprovalsPage, AutomationsPage, BillingPage, BusinessProfileSettingsPage, CapabilityMapPage, CommandCentrePage,
+  AdminChatPage, AnalyticsPage, ApprovalsPage, AutomationsPage, BillingPage, BusinessProfileSettingsPage, CapabilityMapPage,
   ComingSoonPage, CustomersPage, DashboardPage, InboxPage, KnowledgePage, LeadsPage,
   MarketingPage, ModulePage, NotificationsPage, OperationsListPage, OperatorPage, ReviewsPage,
   ReceptionistPage, SecuritySettingsPage, ServicesSettingsPage, SettingsPage, TeamPage,
@@ -27,7 +27,6 @@ export type NavGroup = { label: string; items: NavItem[] };
 export const workspaceNavGroups: NavGroup[] = [
   { label:'', items:[
     ['/app','Today',Home],
-    ['/app/command','Command Centre',Sparkles],
     ['/app/inbox','Inbox',Inbox],
     ['/app/notifications','Notifications',Bell],
   ]},
@@ -55,6 +54,7 @@ export const workspaceNavGroups: NavGroup[] = [
     ['/app/purchasing','Supplier purchasing',Truck],
   ]},
   { label:'AI Admin', items:[
+    ['/app/admin-chat','AI Admin chat',MessageSquareMore],
     ['/app/operator/phone','AI Receptionist',Phone],
     ['/app/automations','Automations',Workflow],
     ['/app/approvals','Approvals',ShieldCheck],
@@ -90,6 +90,7 @@ export const workspaceNavGroups: NavGroup[] = [
 const staffRestrictedPaths = new Set([
   '/app/hiring', '/app/marketing', '/app/brain', '/app/automations', '/app/analytics',
   '/app/approvals', '/app/integrations', '/app/team', '/app/billing', '/app/settings',
+  '/app/admin-chat',
   '/app/operator/phone', '/app/operator', '/app/capabilities', '/app/knowledge',
 ]);
 
@@ -118,7 +119,8 @@ export function routeWorkspacePage(path: string) {
   const comingMatch = path.match(/^\/app\/coming-soon\/([a-z0-9-]+)$/);
   if (comingMatch) return <ComingSoonPage featureKey={comingMatch[1]}/>;
   if (path === '/app') return <DashboardPage/>;
-  if (path === '/app/command') return <CommandCentrePage/>;
+  if (path === '/app/admin-chat') return <AdminChatPage/>;
+  if (path === '/app/command') return <AdminChatPage/>;
   if (path === '/app/inbox') return <InboxPage/>;
   if (path === '/app/notifications') return <NotificationsPage/>;
   if (path === '/app/assets') return <AssetsPage/>;

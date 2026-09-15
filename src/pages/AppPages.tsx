@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowRight, BarChart3, Bot, BriefcaseBusiness, Calendar, CalendarDays, Check, CheckCircle2, CircleDollarSign, ClipboardList, ContactRound, ExternalLink, FileCheck2, FileText, Inbox, LibraryBig, LockKeyhole, MessageSquareMore, Phone, Plus, RefreshCcw, ReceiptText, ShieldCheck, Sparkles, Star, Wallet, Workflow } from 'lucide-react';
+import { AlertTriangle, ArrowRight, BarChart3, Bot, BriefcaseBusiness, Calendar, CalendarDays, Check, CheckCircle2, CircleDollarSign, ClipboardList, ContactRound, ExternalLink, FileCheck2, FileText, Inbox, LibraryBig, LockKeyhole, MessageSquareMore, Phone, PlugZap, Plus, RefreshCcw, ReceiptText, Search, ShieldCheck, Star, Wallet, Workflow } from 'lucide-react';
 import { useAuth } from '../app/auth';
 import { AppLink, navigate } from '../app/router';
 import { apiFetch, ApiError } from '../lib/api';
 import { supabase } from '../lib/supabase';
-import { Card, EmptyState, FeatureStatus, Field, Money, PageIntro, PrimaryButton, SecondaryButton, SelectField, SetupChecklist, Spinner, StatCard, StatusPill, TextareaField } from '../components/saas/ui';
+import { AskAiAdminLink, Card, EmptyState, FeatureStatus, Field, Money, PageIntro, PrimaryButton, SecondaryButton, SelectField, SetupChecklist, Spinner, StatCard, StatusPill, TextareaField } from '../components/saas/ui';
 import { PLAN_CATALOG, PLAN_KEYS } from '../../shared/plans';
 
 function useData<T>(path: string, initial: T) {
@@ -59,19 +59,22 @@ function RevenueFlow({metrics}:{metrics:any}) {
     {label:'Outstanding',sub:(metrics.overdueCents||0)>0?'Some invoices are overdue':'Invoiced, not yet paid',cents:metrics.outstandingCents||0,urgent:(metrics.overdueCents||0)>0},
     {label:'Received',sub:'Paid this month',cents:metrics.monthRevenueCents||0},
   ];
-  return <Card className="mb-6 p-5">
-    <h2 className="mb-4 font-bold">Revenue flow</h2>
-    <div className="flex flex-wrap items-stretch gap-2">
+  return <section className="jobrin-revenue-flow mb-6" aria-labelledby="revenue-flow-title">
+    <div className="jobrin-flow-heading">
+      <div><h2 id="revenue-flow-title">Revenue in motion</h2><p>Follow money from customer decision to payment received.</p></div>
+      <AppLink href="/app/invoices" className="text-sm font-semibold text-indigo-700">Open invoices</AppLink>
+    </div>
+    <div className="jobrin-flow-stages">
       {stages.map((stage,i)=><React.Fragment key={stage.label}>
-        <div className={`min-w-[9rem] flex-1 rounded-lg p-3.5 ${stage.urgent?'border-l-4 border-red-400 bg-red-50/50':'bg-slate-50'}`}>
-          <p className="text-xs font-semibold text-slate-500">{stage.label}</p>
-          <p className="mt-1 text-xl font-black tracking-tight"><Money cents={stage.cents}/></p>
-          <p className="mt-0.5 text-[11px] text-slate-400">{stage.sub}</p>
+        <div className={`jobrin-flow-stage ${stage.urgent?'is-urgent':''}`}>
+          <p>{stage.label}</p>
+          <strong><Money cents={stage.cents}/></strong>
+          <span>{stage.sub}</span>
         </div>
-        {i<stages.length-1&&<div className="flex flex-none items-center text-slate-300"><ArrowRight className="h-4 w-4"/></div>}
+        {i<stages.length-1&&<ArrowRight className="jobrin-flow-arrow h-4 w-4" aria-hidden="true"/>}
       </React.Fragment>)}
     </div>
-  </Card>;
+  </section>;
 }
 
 // --- Decision Queue (was "Needs attention"): urgency is structural (a left
@@ -121,6 +124,100 @@ function AIActivityFeed({items}:{items:any[]}) {
   })}</div>;
 }
 
+function InlineCommand() {
+  const [question,setQuestion]=useState('');
+  const ask=(event:React.FormEvent)=>{event.preventDefault();const value=question.trim();if(value)navigate(`/app/admin-chat?ask=${encodeURIComponent(value)}`);};
+  return <form className="jobrin-inline-command mb-6" onSubmit={ask}>
+    <Search className="h-5 w-5" aria-hidden="true"/>
+    <label className="sr-only" htmlFor="command-question">Ask about this business</label>
+    <input id="command-question" value={question} onChange={event=>setQuestion(event.target.value)} placeholder="Ask about today’s jobs, money owing, leads or follow-ups" />
+    <button type="submit">Ask</button>
+  </form>;
+}
+
+function ApprovalQueue({ items, metrics }: { items: any[]; metrics: any }) {
+  const fallback = [
+    {
+      id: 'quote-draft',
+      title: 'Quote draft waiting for review',
+      description: 'Switchboard upgrade scope is ready to check before sending. GST and payment terms should be reviewed by a human.',
+      href: '/app/quotes',
+      tone: 'indigo',
+      kind: 'approval',
+    },
+    {
+      id: 'invoice-sync',
+      title: 'Invoice and payment follow-up',
+      description: `${new Intl.NumberFormat('en-AU',{style:'currency',currency:'AUD',maximumFractionDigits:0}).format((metrics.outstandingCents || 0) / 100)} remains outstanding across open invoices.`,
+      href: '/app/invoices',
+      tone: (metrics.overdueCents || 0) > 0 ? 'red' : 'amber',
+      kind: 'invoice',
+    },
+    {
+      id: 'receptionist-review',
+      title: 'Receptionist readiness and handoffs',
+      description: 'Review call handling, knowledge and sign-off before any live answering claim appears to operators.',
+      href: '/app/operator/phone',
+      tone: 'amber',
+      kind: 'approval',
+    },
+  ];
+  const rows = items.length ? items : fallback;
+  return <div className="space-y-2">{rows.slice(0, 6).map((item:any) => {
+    const meta=attentionKindMeta[item.kind]||{icon:ShieldCheck,action:'Review'};
+    const Icon=meta.icon;
+    const border=item.tone==='red'?'border-red-400':item.tone==='amber'?'border-amber-400':'border-blue-500';
+    return <AppLink key={item.id} href={item.href} className={`flex items-start gap-3 rounded-lg border border-slate-200 border-l-4 ${border} bg-white p-3 transition hover:border-blue-200 hover:bg-blue-50/35`}>
+      <span className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-slate-100 text-slate-600"><Icon className="h-4 w-4"/></span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-bold text-slate-950">{item.title}</span>
+        <span className="mt-1 block text-xs leading-5 text-slate-500">{item.description}</span>
+      </span>
+      <span className="mt-1 flex-none text-xs font-bold text-blue-700">{meta.action}</span>
+    </AppLink>;
+  })}</div>;
+}
+
+function FieldScheduleLane({ jobs }: { jobs: any[] }) {
+  const fallback = [
+    { id: 'sample-1', title: 'Emergency repair', customer: 'Dave Miller', time: '8:30 am', status: 'scheduled' },
+    { id: 'sample-2', title: 'Ducted service', customer: 'Sarah Lin', time: '11:00 am', status: 'in_progress' },
+    { id: 'sample-3', title: 'Quote inspection', customer: 'Bondi Junction Strata', time: '2:30 pm', status: 'pending' },
+  ];
+  const rows = jobs.length ? jobs.map((job:any) => ({
+    id: job.id,
+    title: job.title,
+    customer: job.customers?.display_name || 'Customer',
+    time: job.scheduled_start ? new Date(job.scheduled_start).toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit'}) : 'Time pending',
+    status: job.status || 'scheduled',
+    href: `/app/jobs/${job.id}`,
+  })) : fallback;
+  return <div className="space-y-2">{rows.slice(0, 5).map((job:any) => {
+    const stateLabel=String(job.status).replace(/_/g,' ');
+    const stateClass=/cancelled|overdue|failed/.test(stateLabel)?'is-risk':/in_progress|confirmed|completed/.test(stateLabel)?'is-live':'';
+    const content = <div className={`jobrin-schedule-stop ${stateClass}`}>
+      <span className="w-20 flex-none text-xs font-bold text-slate-900">{job.time}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold text-slate-950">{job.title}</span>
+        <span className="block truncate text-xs text-slate-500">{job.customer}</span>
+      </span>
+      <span className="jobrin-stop-state">{stateLabel}</span>
+    </div>;
+    return job.href ? <AppLink key={job.id} href={job.href}>{content}</AppLink> : <div key={job.id}>{content}</div>;
+  })}</div>;
+}
+
+function HealthRow({ icon: Icon, label, value, ok }: { icon: any; label: string; value: string; ok: boolean }) {
+  return <div className={`jobrin-health-row ${ok?'is-ready':'needs-setup'}`}>
+    <span className="jobrin-health-icon"><Icon className="h-4 w-4"/></span>
+    <span className="min-w-0 flex-1">
+      <span className="block text-sm font-semibold text-slate-950">{label}</span>
+      <span className="block text-xs text-slate-500">{value}</span>
+    </span>
+    <span className="jobrin-health-state"><i aria-hidden="true"/>{ok ? 'Ready' : 'Needs setup'}</span>
+  </div>;
+}
+
 export function DashboardPage() {
   const query=useData<any>('/api/dashboard',{metrics:{},today:[],attention:[],pulse:[],aiActivity:[]});
   const onboarding=useData<any>('/api/workspaces/onboarding',{steps:[]});
@@ -140,25 +237,205 @@ export function DashboardPage() {
     {label:'Connect Twilio (text customers)',description:'The SMS inbox, campaigns and the AI receptionist all run on your Twilio number.',href:'/app/integrations',done:(integrations.data.integrations||[]).some((i:any)=>i.provider==='twilio'&&i.status==='connected')},
     {label:'Set up email delivery',description:'Quotes and invoices emailed straight to customers with a payment link.',href:'/app/integrations',done:integrations.data.readiness?.email===true},
   ];
-  return <Page title="Today" eyebrow="Run the business" description="Your live snapshot: what the business earned, who needs a reply and what is booked today. Everything links straight to the record so you can act in one click." action={<SecondaryButton onClick={()=>query.refresh()}><RefreshCcw className="mr-2 inline h-4 w-4"/>Refresh</SecondaryButton>}>
-    <SetupChecklist description="Work through these steps and Jobrin.ai is ready to run real work." items={setupItems}/>
-    <JobrynPulse metrics={m} pulse={query.data.pulse||[]} stripeConfigured={billing.data.stripeConfigured===true} openaiConfigured={(integrations.data.readiness as any)?.openai===true}/>
+  const openaiConfigured=(integrations.data.readiness as any)?.openai===true;
+  const stripeConfigured=billing.data.stripeConfigured===true;
+  const twilioConnected=(integrations.data.integrations||[]).some((i:any)=>i.provider==='twilio'&&i.status==='connected');
+  return <Page title="Today" eyebrow="Operations console" description="Resolve the work in front of you, see who is out in the field and protect the money already earned." action={<SecondaryButton onClick={()=>query.refresh()}><RefreshCcw className="mr-2 inline h-4 w-4"/>Refresh</SecondaryButton>}>
+    <SetupChecklist description="Set up the simple job loop: capture customers, book work, quote, invoice and get paid." items={setupItems}/>
+    <InlineCommand/>
+    <JobrynPulse metrics={m} pulse={query.data.pulse||[]} stripeConfigured={stripeConfigured} openaiConfigured={openaiConfigured}/>
     <RevenueFlow metrics={m}/>
-    <div className="grid gap-6 xl:grid-cols-[.85fr_1.15fr]">
-      <Card className="p-5"><div className="mb-4"><h2 className="font-bold">Decision queue</h2><p className="text-xs text-slate-500">The most useful next actions across this workspace</p></div><DecisionQueue items={query.data.attention||[]}/></Card>
-      <Card className="p-5"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold">Today's work</h2><p className="text-xs text-slate-500">Scheduled jobs in this workspace</p></div><AppLink href="/app/schedule" className="text-xs font-semibold text-indigo-600">Open schedule</AppLink></div>{query.data.today?.length?<div className="space-y-2">{query.data.today.map((job:any)=><AppLink href={`/app/jobs/${job.id}`} key={job.id} className="flex items-center gap-3 rounded-xl border border-slate-100 p-3 transition hover:border-indigo-200"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100"><Calendar className="h-4 w-4"/></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{job.title}</p><p className="text-xs text-slate-500">{job.customers?.display_name||'Customer'} · {job.scheduled_start?new Date(job.scheduled_start).toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit'}):'Time pending'}</p></div><StatusPill>{job.status}</StatusPill></AppLink>)}</div>:<EmptyState title="Nothing scheduled today" description="Use Schedule to plan work, or open an unscheduled job from the decision queue."/>}</Card>
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,.65fr)]">
+      <div className="space-y-6">
+        <section className="jobrin-work-section" aria-labelledby="attention-queue-title">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 id="attention-queue-title" className="font-bold">Attention queue</h2>
+              <p className="text-xs text-slate-500">AI suggestions, payment exceptions and operational work that needs a person to act.</p>
+            </div>
+            <span className="jobrin-queue-key"><i aria-hidden="true"/>Human decision needed</span>
+          </div>
+          <ApprovalQueue items={query.data.attention||[]} metrics={m}/>
+        </section>
+        <section className="jobrin-work-section" aria-labelledby="field-schedule-title">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 id="field-schedule-title" className="font-bold">Today's field schedule</h2>
+              <p className="text-xs text-slate-500">Booked work, assigned jobs and the next schedule pressure points.</p>
+            </div>
+            <AppLink href="/app/schedule" className="text-xs font-semibold text-blue-700">Open schedule</AppLink>
+          </div>
+          <FieldScheduleLane jobs={query.data.today||[]}/>
+        </section>
+      </div>
+      <div className="space-y-6">
+        <section className="jobrin-side-section" aria-labelledby="receptionist-activity-title">
+          <div className="mb-4">
+            <h2 id="receptionist-activity-title" className="font-bold">Receptionist activity</h2>
+            <p className="text-xs text-slate-500">Recent activity and whether the answering loop is ready.</p>
+          </div>
+          <AIActivityFeed items={query.data.aiActivity||[]}/>
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <HealthRow icon={Phone} label="Phone and SMS" value={twilioConnected ? 'Twilio connection is live' : 'Connect Twilio before live customer SMS'} ok={twilioConnected}/>
+          </div>
+        </section>
+        <section className="jobrin-side-section" aria-labelledby="revenue-exceptions-title">
+          <div className="mb-4">
+            <h2 id="revenue-exceptions-title" className="font-bold">Revenue exceptions</h2>
+            <p className="text-xs text-slate-500">Quote, invoice and payment states that change what your team should do next.</p>
+          </div>
+          <div className="grid gap-2">
+            <HealthRow icon={Wallet} label="Open quote value" value={`${new Intl.NumberFormat('en-AU',{style:'currency',currency:'AUD',maximumFractionDigits:0}).format((m.openQuotesCents||0)/100)} waiting on customer decisions`} ok={(m.openQuotesCents||0)===0}/>
+            <HealthRow icon={ReceiptText} label="Invoice balances" value={`${new Intl.NumberFormat('en-AU',{style:'currency',currency:'AUD',maximumFractionDigits:0}).format((m.outstandingCents||0)/100)} outstanding`} ok={(m.overdueCents||0)===0}/>
+            <HealthRow icon={PlugZap} label="Payment provider" value={stripeConfigured ? 'Stripe checkout links can be sent' : 'Stripe keys are not configured'} ok={stripeConfigured}/>
+          </div>
+        </section>
+        <section className="jobrin-side-section" aria-labelledby="integration-health-title">
+          <div className="mb-4">
+            <h2 id="integration-health-title" className="font-bold">Setup and integration health</h2>
+            <p className="text-xs text-slate-500">Supported capabilities first; unavailable items stay out of daily navigation.</p>
+          </div>
+          <div className="grid gap-2">
+            <HealthRow icon={Bot} label="AI provider" value={openaiConfigured ? 'AI drafts can be generated' : 'Connect OpenAI before AI drafting'} ok={openaiConfigured}/>
+            <HealthRow icon={CircleDollarSign} label="Stripe" value={stripeConfigured ? 'Subscription and invoice payment links ready' : 'Payments need setup'} ok={stripeConfigured}/>
+            <HealthRow icon={MessageSquareMore} label="Email delivery" value={integrations.data.readiness?.email===true ? 'Email sending is ready' : 'Email provider needs setup'} ok={integrations.data.readiness?.email===true}/>
+          </div>
+        </section>
+      </div>
     </div>
-    <Card className="mt-6 p-5"><div className="mb-4"><h2 className="font-bold">AI activity</h2><p className="text-xs text-slate-500">What the receptionist has actually done — not a magic number</p></div><AIActivityFeed items={query.data.aiActivity||[]}/></Card>
   </Page>;
 }
 
-export function CommandCentrePage() {
-  const {workspaceId}=useAuth(); const [command,setCommand]=useState(''); const [result,setResult]=useState<any>(null); const [busy,setBusy]=useState(false); const [error,setError]=useState('');
-  const run=async(text=command)=>{if(!workspaceId||!text.trim())return;setBusy(true);setError('');try{setResult(await apiFetch('/api/operator/command',{method:'POST',body:JSON.stringify({command:text})},workspaceId))}catch(err:any){setError(err.message)}finally{setBusy(false)}};
-  return <Page title="Command Centre" eyebrow="Controlled Operator" description="Ask questions about your business in plain English. This hardened first version executes supported read-only commands and prepares approval-gated write proposals — the model can never bypass permissions, and every action lands in the Operator log."><Card className="overflow-hidden"><div className="border-b border-slate-100 bg-slate-950 p-6 text-white"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-indigo-300"><Sparkles className="h-4 w-4"/>Ask Jobrin.ai about your business</div><form className="flex gap-2" onSubmit={e=>{e.preventDefault();void run()}}><input value={command} onChange={e=>setCommand(e.target.value)} placeholder="Who owes us money?" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-indigo-400"/><button disabled={busy} className="rounded-xl bg-indigo-500 px-5 text-sm font-semibold text-white disabled:opacity-50">{busy?'Working…':'Run'}</button></form><div className="mt-3 flex flex-wrap gap-2">{["What's happening today?","Who owes us money?","Which lead source made the most money?","Follow up quotes older than three days."].map(s=><button key={s} onClick={()=>{setCommand(s);void run(s)}} className="rounded-full bg-white/10 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/15">{s}</button>)}</div></div><div className="p-6">{error&&<p className="text-sm text-red-600">{error}</p>}{!result&&!error&&<p className="text-sm text-slate-500">This hardened first version executes supported read-only commands and prepares approval-gated write proposals. It does not let the model bypass permissions.</p>}{result&&<CommandResult result={result}/>}</div></Card></Page>;
-}
-
 function CommandResult({result}:{result:any}) { return <div><div className="flex items-center justify-between"><div><h3 className="text-lg font-bold">{result.title}</h3><p className="mt-1 text-sm text-slate-500">{result.summary}</p></div>{result.approvalRequired&&<StatusPill tone="amber">Approval required</StatusPill>}</div>{typeof result.totalCents==='number'&&<div className="mt-5 text-4xl font-black"><Money cents={result.totalCents}/></div>}{result.rows?.length>0&&<div className="mt-5 overflow-x-auto"><table className="w-full text-left text-sm"><tbody>{result.rows.slice(0,20).map((row:any,i:number)=><tr key={row.id||row.source||i} className="border-t border-slate-100"><td className="py-3 font-semibold">{row.customers?.display_name||row.source||row.title||`#${row.invoice_number||row.quote_number||row.job_number||''}`}</td><td className="py-3 text-slate-500">{row.status||''}</td><td className="py-3 text-right font-semibold">{row.balance_due_cents!=null?<Money cents={row.balance_due_cents}/>:row.revenue_cents!=null?<Money cents={row.revenue_cents}/>:''}</td></tr>)}</tbody></table></div>}</div> }
+
+type AdminChatTurn = {
+  role: "user" | "admin";
+  text: string;
+  result?: any;
+};
+
+export function AdminChatPage() {
+  const { workspaceId } = useAuth();
+  const [input, setInput] = useState("");
+  const [turns, setTurns] = useState<AdminChatTurn[]>([
+    {
+      role: "admin",
+      text: "This is a private workspace chat. Ask about jobs, money owed, leads, quotes, follow-ups or what needs attention. Nothing here is sent to customers.",
+    },
+  ]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const quick = [
+    "What's happening today?",
+    "Who owes us money?",
+    "Which lead source made the most money?",
+    "Follow up quotes older than three days.",
+  ];
+  useEffect(() => {
+    const ask = new URLSearchParams(window.location.search).get("ask");
+    if (ask) setInput(ask);
+  }, []);
+  const send = async (text = input) => {
+    if (!workspaceId || !text.trim()) return;
+    const message = text.trim();
+    setInput("");
+    setError("");
+    setBusy(true);
+    setTurns((current) => [...current, { role: "user", text: message }]);
+    try {
+      const result = await apiFetch<any>(
+        "/api/operator/command",
+        { method: "POST", body: JSON.stringify({ command: message }) },
+        workspaceId,
+      );
+      setTurns((current) => [
+        ...current,
+        {
+          role: "admin",
+          text: result.summary || "I checked the workspace records.",
+          result,
+        },
+      ]);
+    } catch (err: any) {
+      setError(err.message || "The admin chat could not answer that yet.");
+      setTurns((current) => [
+        ...current,
+        {
+          role: "admin",
+          text: "I could not answer that yet. Try one of the suggested questions, or ask a more specific question about jobs, invoices, leads or quotes.",
+        },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Page
+      title="Business questions"
+      eyebrow="Private workspace search"
+      description="Ask about jobs, money, leads, quotes or follow-ups. This view only inspects workspace records and drafts next steps; customer actions stay in their normal controls."
+    >
+      <section className="jobrin-business-questions" aria-label="Business question history">
+        <div className="jobrin-question-context"><Bot className="h-4 w-4"/><span>Private business record lookup</span></div>
+        <div className="jobrin-question-thread">
+          {turns.map((turn, index) => (
+            <div
+              key={index}
+              className={`jobrin-question-turn ${
+                turn.role === "user"
+                  ? "is-question"
+                  : "is-answer"
+              }`}
+            >
+              <p>{turn.text}</p>
+              {turn.result && (
+                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-slate-700">
+                  <CommandResult result={turn.result} />
+                </div>
+              )}
+            </div>
+          ))}
+          {busy && (
+            <div className="jobrin-question-turn is-answer text-sm text-slate-500">
+              Checking workspace records...
+            </div>
+          )}
+        </div>
+        <div className="jobrin-question-composer">
+          <div className="jobrin-question-examples">
+            {quick.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => void send(item)}
+                className="text-sm font-semibold text-indigo-700 hover:text-indigo-900"
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+          <form
+            className="jobrin-question-input"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void send();
+            }}
+          >
+            <input
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder="Ask about this business..."
+            />
+            <PrimaryButton disabled={busy || !input.trim()}>
+              {busy ? "Checking..." : "Send"}
+            </PrimaryButton>
+          </form>
+          {error && <p className="mt-2 text-xs font-semibold text-red-600">{error}</p>}
+        </div>
+      </section>
+    </Page>
+  );
+}
 
 export function CustomersPage() {
   const {workspaceId}=useAuth(); const query=useData<any>('/api/crm/customers',{customers:[]}); const [open,setOpen]=useState(false);const [form,setForm]=useState({first_name:'',last_name:'',phone:'',email:'',source:'website',notes:''});const [error,setError]=useState('');const [search,setSearch]=useState('');
@@ -187,7 +464,7 @@ export function LeadsPage() {
     {open&&<Card className="mb-5 p-5"><form onSubmit={createLead} className="grid gap-3 sm:grid-cols-2"><h2 className="font-bold sm:col-span-2">New lead</h2><Field label="What do they need?" value={form.title} onChange={e=>setForm(v=>({...v,title:e.target.value}))} required placeholder="Burst pipe in Salisbury"/><Field label="Source" value={form.source} onChange={e=>setForm(v=>({...v,source:e.target.value}))} placeholder="website, google, referral…"/><Field label="Estimated value (AUD, optional)" type="number" min="0" step="0.01" value={form.estimated_value_dollars} onChange={e=>setForm(v=>({...v,estimated_value_dollars:e.target.value}))}/><div className="sm:col-span-2"><p className="text-xs leading-5 text-slate-500">The lead starts in “new”. Move it across the pipeline as you make contact, quote and book the work — Analytics later attributes the revenue back to the source.</p></div><div className="flex justify-end sm:col-span-2"><PrimaryButton disabled={busyLead==='create'}>{busyLead==='create'?'Saving…':'Save lead'}</PrimaryButton></div></form></Card>}
     <PageIntro>The pipeline reads left to right: a lead enters as <b>new</b>, you make contact, qualify it, quote, book the work and win it. Move a card with the <b>Mark …</b> button; lost enquiries stay in the <b>lost</b> column for later follow-up.</PageIntro>
     {query.error?<ErrorBox message={query.error}/>:query.data.leads.length?<>
-      <div className="mb-5 grid gap-3 sm:grid-cols-3"><StatCard label="Open pipeline" value={<Money cents={openValue}/>} sub="Estimated value of live enquiries" icon={<BriefcaseBusiness className="h-4 w-4"/>}/><StatCard label="Leads" value={query.data.leads.length} sub="Across every stage" icon={<ClipboardList className="h-4 w-4"/>}/><StatCard label="Booked or won" value={query.data.leads.filter((lead:any)=>['booked','won','completed'].includes(lead.stage)).length} sub="Converted into work" icon={<CheckCircle2 className="h-4 w-4"/>}/></div>
+      <div className="jobrin-pipeline-summary"><StatCard label="Open pipeline" value={<Money cents={openValue}/>} sub="Estimated value of live enquiries" icon={<BriefcaseBusiness className="h-4 w-4"/>}/><StatCard label="Leads" value={query.data.leads.length} sub="Across every stage" icon={<ClipboardList className="h-4 w-4"/>}/><StatCard label="Booked or won" value={query.data.leads.filter((lead:any)=>['booked','won','completed'].includes(lead.stage)).length} sub="Converted into work" icon={<CheckCircle2 className="h-4 w-4"/>}/></div>
       <div className="grid auto-cols-[280px] grid-flow-col gap-4 overflow-x-auto pb-4">{stages.map(stage=><div key={stage}><div className="mb-2 flex items-center justify-between"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">{stage}</h3><span className="text-xs text-slate-400">{query.data.leads.filter((l:any)=>l.stage===stage).length}</span></div><div className="space-y-3">{query.data.leads.filter((l:any)=>l.stage===stage).map((lead:any)=><Card key={lead.id} className="p-4"><div className="flex items-start justify-between gap-2"><div><p className="text-sm font-bold">{lead.title}</p><p className="mt-1 text-xs text-slate-500">{lead.customers?.display_name||'Unmatched customer'}</p></div>{lead.estimated_value_cents!=null&&<span className="text-xs font-bold"><Money cents={lead.estimated_value_cents}/></span>}</div><div className="mt-3 flex flex-wrap items-center gap-2">{leadNextStage[lead.stage]&&<button disabled={busyLead===lead.id} onClick={()=>moveLead(lead,leadNextStage[lead.stage])} className="rounded-lg bg-slate-950 px-2.5 py-1.5 text-[11px] font-bold text-white disabled:opacity-50">{busyLead===lead.id?'Moving…':`Mark ${leadNextStage[lead.stage]}`}</button>}{!['won','completed','lost','spam','cancelled'].includes(lead.stage)&&<button disabled={busyLead===lead.id} onClick={()=>moveLead(lead,'lost')} className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-bold text-slate-500 disabled:opacity-50">Lost</button>}</div><div className="mt-2 flex items-center justify-between text-[11px] text-slate-400"><span>{lead.source||'unknown source'}</span><span>{new Date(lead.created_at).toLocaleDateString('en-AU')}</span></div></Card>)}{!query.data.leads.some((l:any)=>l.stage===stage)&&<div className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">No leads</div>}</div></div>)}</div></>:<EmptyState icon={<BriefcaseBusiness className="h-5 w-5"/>} title="No leads yet" description="Every enquiry is money you have already spent time on — the pipeline makes sure none of it slips through, and each lead remembers its source so Analytics can prove what works." steps={['Add the enquiry here (or let an inbound SMS create one)','Make contact and move it to contacted','Quote it, book it and win it']} action={<PrimaryButton onClick={()=>setOpen(true)}><Plus className="mr-2 inline h-4 w-4"/>Add your first lead</PrimaryButton>}/>}</Page>;
 }
 
@@ -548,7 +825,7 @@ export function CapabilityMapPage() {
     {label:'Run the day',items:[
       ['Jobs & scheduling','Create, schedule and complete work from anywhere.','/app/jobs','ready'],
       ['Jobrin.ai Admin (one brain, five hats)','Text previews need OpenAI; live phone answering also needs Twilio and public HTTPS.','/app/operator/phone',openaiReady?'ready':'connect'],
-      ['Command Centre','See exact revenue, outstanding invoices and operational priorities from stored records.','/app/command','ready'],
+      ['AI Admin chat','Ask privately about revenue, outstanding invoices, leads, quotes and operational priorities.','/app/admin-chat','ready'],
       ['Notifications','Every alert that needs you, in one list.','/app/notifications','ready'],
     ]},
     {label:'Money',items:[
@@ -849,4 +1126,9 @@ function ServiceRow({ service, editing, busy, onEdit, onSave, onToggleArchive }:
 }
 
 function ErrorBox({message,onRetry}:{message:string;onRetry?:()=>void}) { return <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700"><div className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4"/>Could not load this page</div><p className="mt-2">{message}</p>{onRetry&&<button onClick={onRetry} className="mt-3 text-xs font-bold underline">Try again</button>}</div> }
-function Page({title,eyebrow,description,action,children}:{title:string;eyebrow:string;description?:string;action?:React.ReactNode;children:React.ReactNode}) { return <div><div className="mb-6 flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.18em] text-indigo-600">{eyebrow}</p><h1 className="mt-1 text-3xl font-black tracking-tight">{title}</h1>{description&&<p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">{description}</p>}</div>{action}</div>{children}</div> }
+function Page({title,eyebrow,description,action,children}:{title:string;eyebrow:string;description?:string;action?:React.ReactNode;children:React.ReactNode}) {
+  const showAi = title !== 'AI Admin chat' && title !== 'Business questions';
+  const prompt = `Help me with the ${title} page in this Jobrin.ai workspace. Look for the most useful next action, any risk I should check, and how this helps turn enquiries into paid jobs.`;
+  const pageKey = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return <div className={`jobrin-page jobrin-page--${pageKey}`}><header className="jobrin-page-header"><div className="jobrin-page-title"><p>{eyebrow}</p><h1>{title}</h1>{description&&<p>{description}</p>}</div><div className="jobrin-page-actions">{showAi&&<AskAiAdminLink prompt={prompt}/>} {action}</div></header><div className="jobrin-page-body">{children}</div></div>;
+}

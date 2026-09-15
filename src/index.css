@@ -41,14 +41,14 @@
 /* Jobrin shared design system: the same rhythm across public and workspace pages. */
 @theme {
   --font-sans: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
-  --color-indigo-50: #eef3ff;
-  --color-indigo-100: #dfe8ff;
-  --color-indigo-200: #bfd0ff;
-  --color-indigo-300: #9ab6ff;
-  --color-indigo-500: #416ee5;
-  --color-indigo-600: #2854ce;
-  --color-indigo-700: #2045aa;
-  --color-slate-400: #64748b;
+  --color-indigo-50: #edf6ef;
+  --color-indigo-100: #d9eee0;
+  --color-indigo-200: #b7ddc4;
+  --color-indigo-300: #8bcaa1;
+  --color-indigo-500: #2f8e55;
+  --color-indigo-600: #176438;
+  --color-indigo-700: #104d2c;
+  --color-slate-400: #718481;
   --text-xs: .875rem;
   --text-xs--line-height: 1.5;
   --text-sm: .9375rem;
@@ -64,15 +64,15 @@
 }
 :root {
   color-scheme: light;
-  --jobrin-surface: #fff;
-  --jobrin-elevated: #fbfcff;
-  --jobrin-border: #d7e0ec;
-  --jobrin-border-strong: #c3cfdd;
-  --jobrin-ink: #16243c;
-  --jobrin-muted: #52627a;
-  --jobrin-canvas: #f3f6fa;
-  --jobrin-shadow: 0 1px 2px rgba(16, 38, 75, .05), 0 16px 34px rgba(16, 38, 75, .055);
-  --jobrin-shadow-soft: 0 1px 2px rgba(16, 38, 75, .04), 0 8px 20px rgba(16, 38, 75, .04);
+  --jobrin-surface: #fdfefd;
+  --jobrin-elevated: #f6f8f5;
+  --jobrin-border: #d9e1de;
+  --jobrin-border-strong: #b8cac2;
+  --jobrin-ink: #10282e;
+  --jobrin-muted: #58706d;
+  --jobrin-canvas: #f2f5f2;
+  --jobrin-shadow: 0 1px 2px rgba(16, 40, 46, .05), 0 16px 34px rgba(16, 40, 46, .055);
+  --jobrin-shadow-soft: 0 1px 2px rgba(16, 40, 46, .04), 0 8px 20px rgba(16, 40, 46, .04);
 }
 html { scroll-padding-top: 6rem; }
 body { margin: 0; background: var(--jobrin-canvas); color: var(--jobrin-ink); font-family: var(--font-sans); font-size: 1rem; line-height: 1.6; -webkit-font-smoothing: antialiased; }
@@ -80,18 +80,32 @@ body { margin: 0; background: var(--jobrin-canvas); color: var(--jobrin-ink); fo
 :where(.flex, .grid) > * { min-width: 0; }
 :where(h1,h2,h3,p,label,td,th) { overflow-wrap: anywhere; }
 h1,h2,h3 { text-wrap: balance; }
-:where(button,a,input,select,textarea,summary):focus-visible { outline: 3px solid #416ee5; outline-offset: 3px; }
+:where(button,a,input,select,textarea,summary):focus-visible { outline: 3px solid #176438; outline-offset: 3px; }
 :where(button,summary) { cursor: pointer; }
 :where(input:not([type=checkbox]):not([type=radio]),select,textarea) { max-width: 100%; min-height: 2.75rem; font-size: 1rem; }
-:where(input[type=checkbox],input[type=radio]) { accent-color: #2854ce; }
+:where(input[type=checkbox],input[type=radio]) { accent-color: #176438; }
 :where(button,a) > svg { flex-shrink: 0; }
 :where(p) { text-wrap: pretty; }
 :where([class~="text-[9px]"],[class~="text-[10px]"],[class~="text-[11px]"]) { font-size: .75rem; line-height: 1.5; }
 .jobrin-card { min-width: 0; border-color: var(--jobrin-border); box-shadow: var(--jobrin-shadow-soft); }
 .jobrin-card:hover { border-color: var(--jobrin-border-strong); }
+.jobrin-status::before { content: ''; display: block; width: .4rem; height: .4rem; flex: none; border-radius: 50%; background: currentColor; }
+.jobrin-page-intro { border-left: 2px solid #b7ddc4; padding: .25rem 0 .25rem 1rem; background: transparent; }
+.jobrin-metric { min-width: 0; padding: .35rem 1rem .35rem 0; border-right: 1px solid var(--jobrin-border); }
+.jobrin-metric:last-child { border-right: 0; }
+.jobrin-setup-checklist { border-block: 1px solid var(--jobrin-border); padding-block: 1rem; }
+.jobrin-setup-step { padding: 1rem 0; border-bottom: 1px solid var(--jobrin-border); }
+.jobrin-setup-step:last-child { border-bottom: 0; }
+/* The application is a working desk, not a wall of product cards. Most
+   surfaces deliberately use open horizontal bands. Explicit modals and public
+   customer documents retain their own framing where it conveys a boundary. */
+.jobrin-main .jobrin-card:not([role="dialog"]) { border-inline: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.jobrin-main .jobrin-card:not([role="dialog"]):hover { border-color: var(--jobrin-border); }
+.jobrin-main .jobrin-card:has(> table) { border-top-color: var(--jobrin-border-strong); border-bottom-color: var(--jobrin-border-strong); }
+.jobrin-main .jobrin-card :where(.bg-white):not(button):not(a):not(input):not(select):not(textarea) { background-color: transparent; }
 .jobrin-primary,.jobrin-secondary { min-height: 2.75rem; line-height: 1.5; }
-.jobrin-primary { background: #2854ce; color: #fff; }
-.jobrin-primary:hover { background: #2045aa; }
+.jobrin-primary { background: #176438; color: #fff; }
+.jobrin-primary:hover { background: #104d2c; }
 .jobrin-secondary { box-shadow: 0 1px 1px rgba(16, 38, 75, .035); }
 .jobrin-card:has(> table) { overflow-x: auto; }
 :where(table) { width: 100%; border-collapse: collapse; }
@@ -100,7 +114,7 @@ h1,h2,h3 { text-wrap: balance; }
 :where(td) { min-width: 7rem; }
 :where(tbody tr):hover { background: var(--jobrin-canvas); }
 :where(.overflow-x-auto) { max-width: 100%; overscroll-behavior-x: contain; }
-.skip-link { position: fixed; left: 1rem; top: -10rem; z-index: 100; padding: .75rem 1rem; border-radius: .5rem; background: #2854ce; color: white; }
+.skip-link { position: fixed; left: 1rem; top: -10rem; z-index: 100; padding: .75rem 1rem; border-radius: .5rem; background: #176438; color: white; }
 .skip-link:focus { top: 1rem; }
 .jobrin-sidebar { display: flex; flex-direction: column; width: min(18rem, 90vw); background: var(--jobrin-surface); box-shadow: 10px 0 28px rgba(16, 38, 75, .045); }
 .jobrin-sidebar > div { flex-shrink: 0; }
@@ -119,54 +133,74 @@ h1,h2,h3 { text-wrap: balance; }
 .jobrin-main .font-black { font-weight: 700; }
 .jobrin-bottom-nav { align-items: stretch; padding-bottom: env(safe-area-inset-bottom); }
 .jobrin-bottom-nav a,.jobrin-bottom-nav button { min-width: 0; padding-inline: .25rem; text-align: center; justify-content: center; font-size: .75rem; line-height: 1.35; }
-.jobrin-bottom-link.is-featured svg { color: #2854ce; }
-.jobrin-bottom-link.is-featured.is-active { color: #2045aa; }
-.jobrin-bottom-link.is-featured.is-active svg { filter: drop-shadow(0 3px 7px rgba(40, 84, 206, .22)); }
+.jobrin-bottom-link.is-featured svg { color: #176438; }
+.jobrin-bottom-link.is-featured.is-active { color: #104d2c; }
+.jobrin-bottom-link.is-featured.is-active svg { filter: drop-shadow(0 3px 7px rgba(23, 100, 56, .22)); }
 .public-header { position: sticky; top: 0; z-index: 40; border-bottom: 1px solid var(--jobrin-border); background: var(--jobrin-surface); }
 .public-header-inner { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; max-width: 80rem; margin: auto; padding: 1rem 2rem; }
 .brand { display: inline-flex; gap: .65rem; align-items: center; font-size: 1.4rem; font-weight: 750; letter-spacing: 0; }
-.brand-mark { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: .5rem; background: #2854ce; color: white; font-size: 1.25rem; }
+.brand-mark { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: .5rem; background: #10282e; color: #f2c24e; font-size: 1.25rem; }
 .public-desktop-nav,.public-header-actions { display: flex; align-items: center; gap: 1.5rem; font-size: .9375rem; font-weight: 600; }
 .public-desktop-nav { color: var(--jobrin-muted); }
-.public-desktop-nav a:hover { color: #2854ce; }
+.public-desktop-nav a:hover { color: #176438; }
 .public-header-actions { gap: .75rem; }
-.public-start { padding: .65rem 1.1rem; border-radius: .65rem; background: #2854ce; color: white; text-align: center; }
-.public-start:hover { background: #2045aa; }
+.public-start { padding: .65rem 1.1rem; border-radius: .65rem; background: #176438; color: white; text-align: center; }
+.public-start:hover { background: #104d2c; }
 .public-menu { display: none; border: 1px solid var(--jobrin-border); border-radius: .65rem; padding: .65rem; }
 .public-mobile-nav { display: grid; padding: .5rem 1.25rem 1rem; border-top: 1px solid var(--jobrin-border); }
 .public-mobile-nav a { padding: .75rem; border-radius: .5rem; }
 .public-mobile-nav a:hover { background: var(--jobrin-canvas); }
 .dark {
   color-scheme: dark;
-  --jobrin-surface: #151e30;
-  --jobrin-elevated: #111a2b;
-  --jobrin-border: #334158;
-  --jobrin-border-strong: #4b5d76;
-  --jobrin-ink: #eef3fc;
-  --jobrin-muted: #bdc9dc;
-  --jobrin-canvas: #0d1626;
+  --jobrin-surface: #10282e;
+  --jobrin-elevated: #15353b;
+  --jobrin-border: #315259;
+  --jobrin-border-strong: #537174;
+  --jobrin-ink: #edf5f1;
+  --jobrin-muted: #bed0ca;
+  --jobrin-canvas: #091c21;
   --jobrin-shadow: 0 1px 2px rgba(0, 0, 0, .2), 0 18px 38px rgba(0, 0, 0, .22);
   --jobrin-shadow-soft: 0 1px 2px rgba(0, 0, 0, .18), 0 8px 22px rgba(0, 0, 0, .16);
 }
 .dark .bg-white { background: var(--jobrin-surface); }
 .dark .bg-slate-50 { background: var(--jobrin-canvas); }
-.dark .bg-white\/90 { background: #151e30f5; }
-.dark .bg-slate-950 { background: #091120; }
-.dark .bg-slate-900 { background: #111d32; }
+.dark .bg-white\/90 { background: #10282ef5; }
+.dark .bg-slate-950 { background: #091c21; }
+.dark .bg-slate-900 { background: #102e35; }
 /* Invariant dark panels must keep their original light foreground scale. */
 .dark :is(.bg-slate-950,.bg-slate-900):has(.text-white),
 .dark :is(.bg-slate-950,.bg-slate-900).text-white { --color-slate-200: #e2e8f0; --color-slate-300: #cbd5e1; --color-slate-400: #a8b8ce; }
-.dark :is(.bg-indigo-50,.bg-indigo-50\/60) { background: #213254; }
-.dark :is(.text-indigo-600,.text-indigo-700) { color: #a8c1ff; }
+.dark :is(.bg-indigo-50,.bg-indigo-50\/60) { background: #153d2a; }
+.dark :is(.text-indigo-600,.text-indigo-700) { color: #a9e3bc; }
 .dark .jobrin-primary { color: #fff; }
 .dark .jobrin-main :is(.text-slate-400,.text-slate-500) { color: #b9c7da; }
 .dark .jobrin-main :is(.text-slate-600,.text-slate-700,.text-slate-800) { color: #d8e2f0; }
 .dark .jobrin-toolbar :is(.text-slate-400,.text-slate-500) { color: #b8c6da; }
-.dark .jobrin-bottom-nav { border-color: #26344d; background: #111a2b; }
-.dark .jobrin-bottom-nav :is(a,button) { color: #aebbd0; }
-.dark .jobrin-bottom-nav .is-active { color: #bcd0ff; }
-.dark .jobrin-bottom-link.is-featured svg { color: #9ab6ff; }
-.dark .jobrin-bottom-link.is-featured.is-active { color: #dfe8ff; }
+.dark .jobrin-bottom-nav { border-color: #29484d; background: #10282e; }
+.dark .jobrin-bottom-nav :is(a,button) { color: #b6c9c4; }
+.dark .jobrin-bottom-nav .is-active { color: #d8f0e1; }
+.dark .jobrin-bottom-link.is-featured svg { color: #8bcaa1; }
+.dark .jobrin-bottom-link.is-featured.is-active { color: #d9eee0; }
+/* Marketing pages keep a stable brand treatment instead of inheriting an
+   operator's workspace theme preference. */
+.jobrin-marketing { color-scheme: light; }
+.jobrin-marketing .bg-slate-50 { background-color: #f6f8f5; }
+.jobrin-marketing .bg-slate-950 { background-color: #10282e; }
+.jobrin-marketing .border-slate-200 { border-color: #d9e1de; }
+.jobrin-marketing .rounded-3xl { border-radius: .5rem; }
+.jobrin-marketing .text-indigo-600,
+.jobrin-marketing .text-indigo-700 { color: #176438; }
+.jobrin-marketing .bg-indigo-600 { background-color: #176438; }
+.jobrin-marketing .bg-indigo-50 { background-color: #edf6ef; }
+.jobrin-marketing .text-indigo-300 { color: #f2c24e; }
+.dark .jobrin-marketing { color: #10282e; }
+.dark .jobrin-marketing .bg-white { background-color: #fff; }
+.dark .jobrin-marketing .marketing-header { background: rgba(253, 254, 253, .95); border-color: #d9e1de; }
+.dark .jobrin-marketing .marketing-header a:not(.marketing-header-cta) { color: #405957; }
+.dark .jobrin-marketing .marketing-header a:hover { color: #10282e; }
+.dark .jobrin-marketing .marketing-header-cta { background: #10282e; color: #fff; }
+.dark .jobrin-marketing .marketing-accent { color: #f2c24e; }
+.dark .jobrin-marketing .marketing-gold-cta { background: #f2c24e; color: #10282e; }
 @media (min-width: 1024px) { .jobrin-workspace > .lg\:pl-\[270px\] { padding-left: 18rem; } }
 @media (max-width: 1023px) { .jobrin-main { padding-bottom: calc(3rem + env(safe-area-inset-bottom)); } }
 @media (max-width: 767px) {
@@ -201,16 +235,154 @@ h1,h2,h3 { text-wrap: balance; }
   --color-slate-200: #e2e8f0;
   --color-slate-300: #cbd5e1;
   --color-slate-400: #94a3b8;
-  background: linear-gradient(180deg, #10203c 0%, #0d172b 100%);
+  background: linear-gradient(180deg, #15353b 0%, #10282e 100%);
 }
-.dark .jobrin-operator-panel { background: #07101f; }
+.dark .jobrin-operator-panel { background: #091c21; }
 .jobrin-main :where(.rounded-2xl,.rounded-3xl) { border-radius: .5rem; }
 .jobrin-main :where(.rounded-xl) { border-radius: .5rem; }
-:where(a,button).bg-slate-950 { background-color: #2854ce; }
-:where(a,button).bg-slate-950:hover { background-color: #2045aa; }
+:where(a,button).bg-slate-950 { background-color: #176438; }
+:where(a,button).bg-slate-950:hover { background-color: #104d2c; }
 @media (max-width: 380px) { .brand-mark { display: none; } }
 @media (max-width: 1023px) {
   .jobrin-sidebar.-translate-x-full { visibility: hidden; }
   .jobrin-sidebar.translate-x-0 { visibility: visible; }
 }
 @media (min-width: 1280px) { .jobrin-console-grid { grid-template-columns: minmax(0, 1.15fr) minmax(360px, .85fr); } }
+
+/* Command Centre: operational surfaces use distinct shapes for money, time,
+   human decisions and service health rather than repeating generic cards. */
+.jobrin-inline-command { display: flex; align-items: center; gap: .75rem; min-height: 3.5rem; padding: .4rem .45rem .4rem 1rem; border: 1px solid var(--jobrin-border-strong); border-radius: .5rem; background: var(--jobrin-surface); box-shadow: var(--jobrin-shadow-soft); color: #176438; }
+.jobrin-inline-command input { min-width: 0; flex: 1; min-height: 2.5rem; border: 0; background: transparent; color: var(--jobrin-ink); outline: 0; }
+.jobrin-inline-command input:focus { box-shadow: none; }
+.jobrin-inline-command button { min-height: 2.5rem; padding: .45rem 1rem; border-radius: .4rem; background: #176438; color: #fff; font-size: .9375rem; font-weight: 700; }
+.jobrin-inline-command button:hover { background: #104d2c; }
+.jobrin-revenue-flow { border-block: 1px solid var(--jobrin-border); padding-block: 1.25rem; }
+.jobrin-flow-heading { display: flex; align-items: end; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.jobrin-flow-heading h2 { font-size: var(--text-h2); font-weight: 700; color: var(--jobrin-ink); }
+.jobrin-flow-heading p { margin-top: .2rem; color: var(--jobrin-muted); font-size: .875rem; }
+.jobrin-flow-stages { display: flex; align-items: stretch; gap: .75rem; }
+.jobrin-flow-stage { flex: 1 1 0; min-width: 0; padding: .25rem 0 .25rem 1rem; border-left: 2px solid #b7ddc4; }
+.jobrin-flow-stage:first-child { padding-left: 0; border-left: 0; }
+.jobrin-flow-stage.is-urgent { border-left-color: #b42318; }
+.jobrin-flow-stage p { color: var(--jobrin-muted); font-size: .8125rem; font-weight: 700; }
+.jobrin-flow-stage strong { display: block; margin-top: .25rem; color: var(--jobrin-ink); font-size: 1.375rem; line-height: 1.25; }
+.jobrin-flow-stage span { display: block; margin-top: .2rem; color: var(--jobrin-muted); font-size: .8125rem; line-height: 1.4; }
+.jobrin-flow-arrow { align-self: center; flex: none; color: #8ca7a0; }
+.jobrin-work-section { padding-block: 0 1.25rem; border-bottom: 1px solid var(--jobrin-border); }
+.jobrin-work-section:last-child { border-bottom: 0; padding-bottom: 0; }
+.jobrin-side-section { padding-block: 0 1.25rem; border-bottom: 1px solid var(--jobrin-border); }
+.jobrin-side-section:last-child { border-bottom: 0; padding-bottom: 0; }
+.jobrin-queue-key { display: inline-flex; align-items: center; gap: .45rem; color: #a76000; font-size: .8125rem; font-weight: 700; }
+.jobrin-queue-key i, .jobrin-health-state i { display: block; width: .5rem; height: .5rem; border-radius: 50%; background: currentColor; }
+.jobrin-schedule-stop { display: flex; align-items: center; gap: .75rem; min-height: 4.5rem; border-top: 1px solid var(--jobrin-border); padding: .75rem .25rem; }
+.jobrin-schedule-stop:last-child { border-bottom: 1px solid var(--jobrin-border); }
+.jobrin-schedule-stop.is-live { box-shadow: inset 3px 0 #176438; padding-left: .75rem; }
+.jobrin-schedule-stop.is-risk { box-shadow: inset 3px 0 #b42318; padding-left: .75rem; }
+.jobrin-stop-state { flex: none; color: var(--jobrin-muted); font-size: .8125rem; font-weight: 700; text-transform: capitalize; }
+.jobrin-health-row { display: flex; align-items: center; gap: .75rem; min-height: 3.75rem; border-top: 1px solid var(--jobrin-border); padding: .65rem 0; }
+.jobrin-health-row:last-child { border-bottom: 1px solid var(--jobrin-border); }
+.jobrin-health-icon { display: grid; place-items: center; width: 2.25rem; height: 2.25rem; border: 1px solid var(--jobrin-border); border-radius: .4rem; color: var(--jobrin-muted); }
+.jobrin-health-row.is-ready .jobrin-health-icon { border-color: #9ed5b7; color: #137a57; }
+.jobrin-health-row.needs-setup .jobrin-health-icon { border-color: #ebc883; color: #a76000; }
+.jobrin-health-state { display: inline-flex; align-items: center; gap: .4rem; flex: none; color: #137a57; font-size: .8125rem; font-weight: 700; }
+.jobrin-health-row.needs-setup .jobrin-health-state { color: #a76000; }
+.jobrin-business-questions { border-block: 1px solid var(--jobrin-border); }
+.jobrin-question-context { display: flex; align-items: center; gap: .5rem; padding: .875rem 0; border-bottom: 1px solid var(--jobrin-border); color: var(--jobrin-muted); font-size: .875rem; font-weight: 700; }
+.jobrin-question-thread { display: flex; flex-direction: column; gap: 1rem; max-height: 38rem; overflow-y: auto; padding: 1.25rem 0; }
+.jobrin-question-turn { max-width: min(50rem, 88%); padding: .875rem 1rem; border-radius: .5rem; font-size: .9375rem; line-height: 1.55; }
+.jobrin-question-turn.is-answer { align-self: flex-start; border-left: 3px solid #176438; background: var(--jobrin-elevated); color: var(--jobrin-ink); }
+.jobrin-question-turn.is-question { align-self: flex-end; background: #176438; color: #fff; }
+.jobrin-question-composer { border-top: 1px solid var(--jobrin-border); padding: 1rem 0; }
+.jobrin-question-examples { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin-bottom: .875rem; }
+.jobrin-question-input { display: flex; gap: .75rem; }
+.jobrin-question-input input { min-width: 0; flex: 1; min-height: 2.75rem; border: 1px solid var(--jobrin-border-strong); border-radius: .5rem; background: var(--jobrin-surface); padding: .65rem .8rem; color: var(--jobrin-ink); }
+.jobrin-question-input input:focus { border-color: #176438; }
+
+/* Page architecture: each route starts with a proper work header and a broad
+   task body. It replaces the repeated title + card-stack composition. */
+.jobrin-page { min-width: 0; }
+.jobrin-page-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--jobrin-border-strong); }
+.jobrin-page-title { max-width: 52rem; }
+.jobrin-page-title > p:first-child { color: #176438; font-size: .75rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.jobrin-page-title h1 { margin-top: .25rem; color: var(--jobrin-ink); font-size: clamp(2rem, 3vw, 3rem); font-weight: 750; line-height: 1.08; }
+.jobrin-page-title h1 + p { max-width: 46rem; margin-top: .7rem; color: var(--jobrin-muted); font-size: 1rem; line-height: 1.65; }
+.jobrin-page-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .5rem; }
+.jobrin-page-body { padding-top: 1.75rem; }
+.jobrin-pipeline-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 1.5rem 0; border-block: 1px solid var(--jobrin-border); }
+/* Pipeline is a lifecycle rail: columns are stages of customer progress, not
+   generic kanban buckets. Tickets expose stage-age so neglected enquiries are
+   apparent while the board is scanned. */
+.jobrin-page--leads .jobrin-pipeline-summary + div { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(15rem, 1fr); gap: 0; overflow-x: auto; padding-bottom: .75rem; border-bottom: 1px solid var(--jobrin-border); }
+.jobrin-page--leads .jobrin-pipeline-summary + div > div { position: relative; min-width: 15rem; padding: 0 1rem 1rem; border-left: 1px solid var(--jobrin-border); }
+.jobrin-page--leads .jobrin-pipeline-summary + div > div:first-child { padding-left: 0; border-left: 0; }
+.jobrin-page--leads .jobrin-pipeline-summary + div > div > div:first-child { display: flex; align-items: center; gap: .5rem; min-height: 3.25rem; margin-bottom: .5rem; border-bottom: 2px solid #b7ddc4; }
+.jobrin-page--leads .jobrin-pipeline-summary + div h3 { color: var(--jobrin-ink); font-size: .8125rem; font-weight: 800; text-transform: capitalize; }
+.jobrin-page--leads .jobrin-pipeline-summary + div .jobrin-card { position: relative; margin: 0; padding: .9rem 0 !important; border: 0 !important; border-bottom: 1px solid var(--jobrin-border) !important; }
+.jobrin-page--leads .jobrin-pipeline-summary + div .jobrin-card:has(.text-slate-400) { border: 1px dashed var(--jobrin-border) !important; border-radius: .5rem !important; padding: 1rem !important; }
+.jobrin-page--leads .jobrin-pipeline-summary + div .jobrin-card > div:first-child > div > p:first-child { color: var(--jobrin-ink); }
+.jobrin-page--leads .jobrin-pipeline-summary + div .jobrin-card > div:first-child > div > p:nth-child(2) { font-size: .875rem; font-weight: 700; color: var(--jobrin-ink); }
+.jobrin-page--leads .jobrin-pipeline-summary + div .jobrin-card > div:last-child { padding-top: .4rem; }
+/* Inbox is an actual communications desk: queue, active conversation and the
+   team context are joined by shared dividers rather than separated cards. */
+.jobrin-page--inbox .jobrin-page-body > .grid { display: grid; grid-template-columns: minmax(15rem, .72fr) minmax(25rem, 1.55fr) minmax(17rem, .73fr); gap: 0; min-height: min(44rem, calc(100vh - 15rem)); border-block: 1px solid var(--jobrin-border-strong); }
+.jobrin-page--inbox .jobrin-page-body > .grid > .jobrin-card { min-height: 0 !important; border: 0 !important; border-right: 1px solid var(--jobrin-border) !important; border-radius: 0 !important; }
+.jobrin-page--inbox .jobrin-page-body > .grid > .jobrin-card:last-child { border-right: 0 !important; }
+.jobrin-page--inbox .jobrin-page-body > .grid > .jobrin-card:first-child { background: var(--jobrin-elevated); }
+.jobrin-page--inbox .jobrin-page-body > .grid > .jobrin-card:first-child button { padding: 1rem; }
+.jobrin-page--inbox .jobrin-page-body > .grid > .jobrin-card:nth-child(2) { background: var(--jobrin-surface); }
+.jobrin-page--inbox .jobrin-page-body > .grid > .jobrin-card:nth-child(3) { background: var(--jobrin-elevated); }
+.jobrin-page--inbox .jobrin-page-body > .grid > .jobrin-card:nth-child(2) > .bg-slate-50\/60 { background: transparent; }
+.jobrin-page--jobs .jobrin-page-body > .jobrin-card, .jobrin-page--quotes .jobrin-page-body > .jobrin-card, .jobrin-page--invoices .jobrin-page-body > .jobrin-card { max-width: 70rem; margin-inline: auto; }
+.jobrin-page--settings .jobrin-page-body, .jobrin-page--integrations .jobrin-page-body, .jobrin-page--team .jobrin-page-body { max-width: 74rem; }
+
+@media (max-width: 1023px) {
+  .jobrin-page-header { grid-template-columns: 1fr; gap: 1rem; }
+  .jobrin-page-actions { justify-content: flex-start; }
+  .jobrin-page--inbox .jobrin-page-body > .grid { grid-template-columns: minmax(15rem, .8fr) minmax(23rem, 1.4fr); overflow-x: auto; }
+  .jobrin-page--inbox .jobrin-page-body > .grid > .jobrin-card:last-child { display: none; }
+}
+
+/* Public product preview: a workspace-like desk built from lines and lanes,
+   not a stack of decorative cards. */
+.jobrin-public-preview { overflow: hidden; border-block: 1px solid #cfd9d6; background: #fff; }
+.jobrin-preview-topline { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.25rem; border-bottom: 1px solid #d9e1de; }
+.jobrin-preview-live { display: inline-flex; align-items: center; gap: .45rem; color: #137a57; font-size: .8125rem; font-weight: 700; white-space: nowrap; }
+.jobrin-preview-live span { display: block; width: .5rem; height: .5rem; border-radius: 50%; background: #137a57; }
+.jobrin-preview-inbound,.jobrin-preview-today { padding: 1.25rem; background: #f6f8f5; }
+.jobrin-preview-inbound { border-bottom: 1px solid #d9e1de; }
+.jobrin-preview-inbound-row { padding: .75rem 0; border-top: 1px solid #d9e1de; }
+.jobrin-preview-inbound-row:first-child { border-top: 0; padding-top: 0; }
+.jobrin-preview-work { padding: 1.5rem 1.25rem; }
+.jobrin-preview-action { padding: 1rem 0 1rem 1rem; border-top: 1px solid #d9e1de; border-left: 3px solid #b8cac2; }
+.jobrin-preview-action.is-primary { border-left-color: #1769aa; background: #f3f8fc; }
+.jobrin-preview-today { border-top: 1px solid #d9e1de; }
+.jobrin-preview-stop { display: flex; gap: .75rem; padding: .7rem 0; border-top: 1px solid #d9e1de; }
+.jobrin-preview-stop:first-child { padding-top: 0; border-top: 0; }
+@media (min-width: 1024px) {
+  .jobrin-preview-inbound { border-right: 1px solid #d9e1de; border-bottom: 0; }
+  .jobrin-preview-today { border-top: 0; border-left: 1px solid #d9e1de; }
+}
+
+@media (max-width: 767px) {
+  .jobrin-flow-stages { display: grid; grid-template-columns: 1fr; gap: .5rem; }
+  .jobrin-flow-stage { min-height: auto; padding: .7rem 0 .7rem .875rem; border-top: 1px solid var(--jobrin-border); border-left: 2px solid #b7ddc4; }
+  .jobrin-flow-stage:first-child { padding-left: .875rem; border-top: 1px solid var(--jobrin-border); border-left: 2px solid #b7ddc4; }
+  .jobrin-flow-arrow { display: none; }
+  .jobrin-stop-state { max-width: 5.5rem; text-align: right; }
+  .jobrin-health-row { align-items: flex-start; }
+  .jobrin-health-state { margin-top: .2rem; font-size: .75rem; }
+  .jobrin-question-turn { max-width: 94%; }
+  .jobrin-question-input { align-items: stretch; flex-direction: column; }
+  .jobrin-question-input button { width: 100%; }
+  .jobrin-preview-topline { align-items: flex-start; flex-direction: column; }
+  .jobrin-metric { padding: .75rem 0; border-right: 0; border-bottom: 1px solid var(--jobrin-border); }
+  .jobrin-metric:last-child { border-bottom: 0; }
+  .jobrin-page-header { padding-bottom: 1.25rem; }
+  .jobrin-page-title h1 { font-size: 2rem; }
+  .jobrin-page-body { padding-top: 1.25rem; }
+  .jobrin-pipeline-summary { grid-template-columns: 1fr; }
+  .jobrin-page--leads .jobrin-pipeline-summary + div { grid-auto-columns: minmax(17rem, 85vw); }
+  .jobrin-page--inbox .jobrin-page-body > .grid { display: block; min-height: 0; border: 0; }
+  .jobrin-page--inbox .jobrin-page-body > .grid > .jobrin-card { display: none; min-height: auto !important; border: 1px solid var(--jobrin-border) !important; border-radius: .5rem !important; }
+  .jobrin-page--inbox .jobrin-page-body > .grid > .jobrin-card:nth-child(2) { display: flex; }
+}

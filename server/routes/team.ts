@@ -63,6 +63,7 @@ router.post('/invites', requireRole('owner', 'admin'), requireSensitiveAuth, val
   // passwordless, unnotified account nobody could sign in to.
   const invite = await supabaseAdmin.auth.admin.inviteUserByEmail(req.body.email, {
     data: { display_name: req.body.display_name || req.body.email.split('@')[0] },
+    redirectTo: new URL('/set-password', env.APP_URL).toString(),
   });
   if (invite.error) {
     if (/already been registered/i.test(invite.error.message)) {

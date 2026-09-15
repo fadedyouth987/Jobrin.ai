@@ -6,7 +6,7 @@ export function Spinner({ label = 'Loading' }: { label?: string }) {
 }
 
 export function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <div className={`jobrin-card rounded-lg border border-slate-200 bg-white shadow-sm ${className}`}>{children}</div>;
+  return <div className={`jobrin-card rounded-lg border border-slate-200 bg-white ${className}`}>{children}</div>;
 }
 
 export function PrimaryButton({ children, className = '', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
@@ -15,6 +15,14 @@ export function PrimaryButton({ children, className = '', ...props }: React.Butt
 
 export function SecondaryButton({ children, className = '', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return <button {...props} className={`jobrin-secondary rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}>{children}</button>;
+}
+
+export function aiAdminHref(prompt: string) {
+  return `/app/admin-chat?ask=${encodeURIComponent(prompt)}`;
+}
+
+export function AskAiAdminLink({ prompt, label = 'Ask AI Admin', className = '' }: { prompt: string; label?: string; className?: string }) {
+  return <AppLink href={aiAdminHref(prompt)} className={`inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100 ${className}`}>{label}</AppLink>;
 }
 
 export function Field({ label, hint, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string }) {
@@ -31,13 +39,13 @@ export function TextareaField({ label, ...props }: React.TextareaHTMLAttributes<
 
 export function StatusPill({ children, tone = 'slate' }: { children: React.ReactNode; tone?: 'slate'|'green'|'amber'|'red'|'indigo' }) {
   const tones = {
-    slate: 'bg-slate-100 text-slate-700',
-    green: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-    amber: 'bg-amber-50 text-amber-700 ring-amber-200',
-    red: 'bg-red-50 text-red-700 ring-red-200',
-    indigo: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+    slate: 'text-slate-600 before:bg-slate-400',
+    green: 'text-emerald-700 before:bg-emerald-600',
+    amber: 'text-amber-800 before:bg-amber-600',
+    red: 'text-red-700 before:bg-red-600',
+    indigo: 'text-indigo-700 before:bg-indigo-600',
   };
-  return <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset ${tones[tone]}`}>{children}</span>;
+  return <span className={`jobrin-status inline-flex items-center gap-1.5 text-[11px] font-semibold ${tones[tone]}`}>{children}</span>;
 }
 
 export function Money({ cents, className = '' }: { cents: number; className?: string }) {
@@ -47,14 +55,14 @@ export function Money({ cents, className = '' }: { cents: number; className?: st
 // A short explainer band shown under the page title. Every page uses it to
 // tell a new operator what the page is for before any data exists.
 export function PageIntro({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <div className={`mb-5 flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50/80 p-4 text-sm leading-6 text-slate-600 ${className}`}><span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-indigo-100 text-xs font-black text-indigo-700">i</span><div className="min-w-0">{children}</div></div>;
+  return <div className={`jobrin-page-intro mb-5 flex items-start gap-3 text-sm leading-6 text-slate-600 ${className}`}><span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-indigo-100 text-xs font-black text-indigo-700">i</span><div className="min-w-0">{children}</div></div>;
 }
 
 // Compact metric card with an icon accent. Used in page summary strips. A
 // `pendingNote` explains why a value is zero or pending inline — numbers never
 // appear without their context.
 export function StatCard({ icon, label, value, sub, pendingNote, className = '' }: { icon?: React.ReactNode; label: string; value: React.ReactNode; sub?: string; pendingNote?: string; className?: string }) {
-  return <Card className={`p-4 ${className}`}><div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-500">{label}</p>{icon && <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">{icon}</span>}</div><div className="mt-1.5 text-2xl font-black tracking-tight text-slate-950">{value}</div>{sub && <p className="mt-1 text-[11px] leading-4 text-slate-400">{sub}</p>}{pendingNote && <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] leading-4 font-medium text-amber-800">{pendingNote}</p>}</Card>;
+  return <div className={`jobrin-metric ${className}`}><div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-500">{label}</p>{icon && <span className="text-indigo-600">{icon}</span>}</div><div className="mt-1.5 text-2xl font-black tracking-tight text-slate-950">{value}</div>{sub && <p className="mt-1 text-[11px] leading-4 text-slate-400">{sub}</p>}{pendingNote && <p className="mt-2 text-[11px] leading-4 font-medium text-amber-800">{pendingNote}</p>}</div>;
 }
 
 // Guided first-run card. Each item is a real next step with its destination;
@@ -69,17 +77,17 @@ export function SetupChecklist({ title = 'Set up your workspace', description, i
   const pending = items.filter((item) => !item.done);
   if (!pending.length) return null;
   return (
-    <Card className={`mb-6 overflow-hidden ${className}`}>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-950 p-5 text-white">
+    <section className={`jobrin-setup-checklist mb-6 ${className}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
         <div>
-          <h2 className="font-bold">{title}</h2>
-          {description && <p className="mt-1 text-xs leading-5 text-slate-300">{description}</p>}
+          <h2 className="font-bold text-slate-950">{title}</h2>
+          {description && <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>}
         </div>
-        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-indigo-200">{items.length - pending.length} of {items.length} done</span>
+        <span className="text-xs font-bold text-indigo-700">{items.length - pending.length} of {items.length} done</span>
       </div>
-      <div className="divide-y divide-slate-100">
+      <div>
         {pending.map((item, index) => (
-          <AppLink key={item.href + item.label} href={item.href} className="flex items-start gap-3 p-4 transition hover:bg-indigo-50/40">
+          <AppLink key={item.href + item.label} href={item.href} className="jobrin-setup-step flex items-start gap-3 transition hover:bg-indigo-50/40">
             <span className="mt-0.5 flex h-6 w-6 flex-none items-center justify-center rounded-full bg-slate-100 text-[11px] font-black text-slate-500">{doneCount + index + 1}</span>
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-semibold text-slate-900">{item.label}</span>
@@ -89,7 +97,7 @@ export function SetupChecklist({ title = 'Set up your workspace', description, i
           </AppLink>
         ))}
       </div>
-    </Card>
+    </section>
   );
 }
 

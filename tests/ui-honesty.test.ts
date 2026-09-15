@@ -4,16 +4,17 @@ import test from "node:test";
 
 const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 
-test("the public hero demo never promises a booking the receptionist cannot make", async () => {
+test("the public hero demo never promises work the receptionist cannot make", async () => {
   const source = await read("../src/pages/PublicHome.tsx");
   assert.doesNotMatch(source, /I can book one of our plumbers/i);
-  assert.match(source, /Can I take your name and a callback number\?/);
+  assert.match(source, /AI captured the details and created a callback task\./);
   assert.doesNotMatch(source, /suggests bookings/i);
 });
 
-test("the AI Command Centre is reachable from the truth-in-UI navigation", async () => {
+test("the AI Admin chat is reachable from the truth-in-UI navigation", async () => {
   const navigation = await read("../src/app/workspaceNavigation.tsx");
-  assert.match(navigation, /\['\/app\/command','Command Centre',Sparkles\]/);
+  assert.match(navigation, /\['\/app\/admin-chat','AI Admin chat',MessageSquareMore\]/);
+  assert.match(navigation, /if \(path === '\/app\/command'\) return <AdminChatPage\/>;/);
 });
 
 test("dashboard navigation label matches the page it renders", async () => {

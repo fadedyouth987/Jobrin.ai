@@ -19,6 +19,11 @@ const ResetPasswordPage = lazy(() =>
     default: module.ResetPasswordPage,
   })),
 );
+const SetPasswordPage = lazy(() =>
+  import("./pages/PasswordPages").then((module) => ({
+    default: module.SetPasswordPage,
+  })),
+);
 const MfaPage = lazy(() => import("./pages/MfaPage"));
 const OnboardingPage = lazy(() => import("./pages/OnboardingPage"));
 const PublicQuotePage = lazy(() => import("./pages/PublicQuotePage"));
@@ -71,6 +76,7 @@ function Routes() {
   if (path === "/auth/callback") return <AuthCallbackPage />;
   if (path === "/forgot-password") return <ForgotPasswordPage />;
   if (path === "/reset-password") return <ResetPasswordPage />;
+  if (path === "/set-password") return <SetPasswordPage />;
   if (path === "/payment-complete") return <PaymentOutcome complete />;
   if (path === "/payment-cancelled") return <PaymentOutcome complete={false} />;
   if (path === "/mfa") return <MfaPage />;

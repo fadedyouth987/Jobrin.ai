@@ -99,6 +99,7 @@ test('team invitations need owner or admin, sensitive auth and the service role'
   assert.doesNotMatch(teamSource, /createUser\(/);
   assert.doesNotMatch(teamSource, /email_confirm/);
   assert.match(teamSource, /invite\.data\?\.user\?\.id \?\? null/);
+  assert.match(teamSource, /redirectTo: new URL\('\/set-password', env\.APP_URL\)\.toString\(\)/);
 });
 
 test('automation steps are classified before anything executes', () => {

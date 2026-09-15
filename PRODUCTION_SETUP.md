@@ -41,7 +41,7 @@ Apply migrations in order:
 17. `supabase/migrations/0017_trade_hiring_pipeline.sql`
 18. `supabase/migrations/0018_communications_hub.sql`
 19. `supabase/migrations/0019_deployment_hardening.sql`
-20. Apply the remaining numbered migrations in order through `supabase/migrations/0026_rename_jobrin_assets_bucket.sql`.
+20. Apply every remaining migration file in lexicographic order, including the later timestamped migrations under `supabase/migrations/`.
 
 Use the browser publishable/anon key only in `VITE_*` variables. The service-role key belongs on the server only.
 
@@ -62,7 +62,7 @@ In Supabase Authentication:
 - enable email/password
 - require email verification in production
 - configure the production Site URL
-- allow `https://jobrin.ai/auth/callback`, `https://jobrin.ai/reset-password`, and `https://jobrin.ai/accept-invite`
+- allow `https://jobrin.ai/auth/callback`, `https://jobrin.ai/reset-password`, and `https://jobrin.ai/set-password`
 - enable Google and GitHub as the first OAuth providers
 - optionally enable Azure/Microsoft and Apple
 - configure provider client IDs/secrets in Supabase, never in the browser
@@ -118,6 +118,7 @@ Minimum production variables:
 
 ```env
 NODE_ENV=production
+DEPLOYMENT_STAGE=production
 APP_URL=https://jobrin.ai
 CORS_ORIGINS=https://jobrin.ai,https://www.jobrin.ai
 TRUST_PROXY=1
@@ -127,7 +128,6 @@ VITE_SUPABASE_ANON_KEY=...
 SUPABASE_URL=...
 SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
-RECEPTIONIST_SIGNING_SECRET=...
 
 STRIPE_SECRET_KEY=...
 STRIPE_WEBHOOK_SECRET=...
@@ -135,10 +135,18 @@ STRIPE_PRICE_STARTER=...
 STRIPE_PRICE_GROWTH=...
 STRIPE_PRICE_OPERATOR=...
 
+TWILIO_ACCOUNT_SID=...
+TWILIO_AUTH_TOKEN=...
+TWILIO_PHONE_NUMBER=...
+
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-5-mini
+
+EMAIL_API_KEY=...
+EMAIL_FROM=Jobrin.ai <noreply@jobrin.ai>
+
 REQUIRE_AAL2_SENSITIVE=true
 REQUIRE_EMAIL_VERIFICATION=true
-GEMINI_API_KEY=...
-GEMINI_MODEL=gemini-3.7-flash
 ```
 
 Use a managed secrets store on your host. Do not place secrets in `VITE_*` variables or source control.

@@ -38,6 +38,8 @@ npm run dev
 Open `http://localhost:3000`.
 
 Read [`PRODUCTION_SETUP.md`](./PRODUCTION_SETUP.md) before configuring Supabase, OAuth or Stripe.
+For repeatable debugging, security reviews and production-readiness checks, use
+[`CODEX_DEBUGGING_GUIDE.md`](./CODEX_DEBUGGING_GUIDE.md).
 
 ## Status
 
