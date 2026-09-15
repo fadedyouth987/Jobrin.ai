@@ -94,6 +94,19 @@ const staffRestrictedPaths = new Set([
   '/app/operator/phone', '/app/operator', '/app/capabilities', '/app/knowledge',
 ]);
 
+/* Cockpit rail: the seven primary surfaces live on the desktop icon rail.
+   Everything else — including coming-soon features — stays reachable through
+   the command palette (Ctrl/Cmd+K), so the chrome stays scannable. */
+export const primaryRail: NavItem[] = [
+  ['/app', 'Today', Home],
+  ['/app/inbox', 'Inbox', Inbox],
+  ['/app/customers', 'Customers', ContactRound],
+  ['/app/schedule', 'Schedule & Dispatch', CalendarDays],
+  ['/app/jobs', 'Jobs', FileCheck2],
+  ['/app/quotes', 'Quotes', FileText],
+  ['/app/admin-chat', 'AI Admin chat', MessageSquareMore],
+];
+
 export function visibleWorkspaceGroups(role?: string | null): NavGroup[] {
   if (role !== 'staff') return workspaceNavGroups;
   return workspaceNavGroups.map((group) => ({
