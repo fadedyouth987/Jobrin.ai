@@ -16,7 +16,8 @@ Date: 2026-09-04
 ## Supabase connection state
 
 The working copy intentionally contains only `.env.example` placeholders. Production
-credentials are not stored here. The connected Jobrin.ai.AI Supabase project was
+credentials are not stored here. The connected Supabase project (named "Jobryn.AI",
+ref `pmqtkcenovlwshurglkp`; see RECEPTIONIST_REDESIGN_PLAN.md §6f) was
 reviewed separately on 2026-09-04; its hiring and communications migrations were
 applied after a schema/RLS verification.
 

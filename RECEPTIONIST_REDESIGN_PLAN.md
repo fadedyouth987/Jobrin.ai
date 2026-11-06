@@ -271,6 +271,55 @@ exists. That changes nothing on a database that has the table.
 - 6 browser checks of the lead cards and the settings field.
 - **Not tested against live Supabase or Twilio.**
 
+### 6f. Live Supabase project compared with the repo (read-only)
+
+**The project is `Jobryn.AI` (`pmqtkcenovlwshurglkp`, ap-southeast-2).** It
+holds 16 users, 9 workspaces (all with active or trialing subscriptions),
+6 customers, 1 receptionist profile, 0 calls and 5 stored files. Its
+migration history has 36 entries, but they don't map 1:1 to the repo's files:
+much of it was applied by hand.
+
+Method: I fingerprinted every table, column, index, constraint, policy,
+function, trigger, grant and bucket in a database built from all the repo's
+migrations, ran the same read-only query on live, and diffed the two (names,
+then function bodies and policy expressions by checksum). Nothing was written
+to live. Results:
+
+- **Matches:** RLS is enabled on every live table, and every public RLS policy
+  expression is identical to the repo's. Function-body differences are only
+  formatting and comments; I read and compared the logic of the tenant
+  helpers, billing, usage and signup functions.
+- **Live has, repo lacked:** 66 foreign-key indexes, and execution of
+  `handle_new_user` revoked from browser roles. Both are now captured in
+  `20261105000000_reconcile_live_schema.sql`.
+- **Security gap on live:** table-wide `SELECT` on `integrations`, including
+  `encrypted_credentials`, granted to every member by an ad-hoc change on 28
+  Aug. The table has 0 rows today. The reconciliation migration revokes it.
+- **Repo has, live lacks:**
+  - `calls_outcome_check`, three `receptionist_profiles` length checks and
+    `leads_receptionist_idempotency_unique`. The reconciliation migration adds
+    them; the checks are added `NOT VALID`, so existing rows can't fail them.
+  - **The `jobrin-assets` storage bucket.** Live still has `vantory-assets`
+    (5 files), and its policies use that name. The code uploads to
+    `jobrin-assets`, so **job photo upload, listing and delete fail on live
+    today.** Migration `0026` was never applied there.
+- **Correction:** commit messages from 14 Sep say `0028`–`0030` and the four
+  `20260914…` migrations were "not applied". Live's history shows they were.
+- Not reconciled (naming only): `ai_actions` and `appointments` have
+  equivalent indexes under different names on each side, and live's
+  receptionist range checks are a single combined `phase1_limits_check`.
+
+**Applying to live (needs your go-ahead; nothing has been applied):**
+1. Confirm a recent backup exists in the Supabase dashboard (Database → Backups).
+2. `20261105000000_reconcile_live_schema.sql`
+3. `20261106000000_workspace_product_surface.sql`. The 9 existing workspaces
+   become `full`, so nothing they see changes.
+4. `20261106010000_receptionist_call_outcomes.sql`
+5. Bucket: create `jobrin-assets` with `0026`'s policies, copy the 5 files
+   across with the Storage API (this needs the service-role key, so it can't
+   be done in SQL), then retire `vantory-assets`.
+6. Then deploy this branch.
+
 ---
 
 ## 7. Phase 1–3, mapped to files
@@ -303,7 +352,9 @@ follow-ups rather than building a second worker.
 | Priority | Finding | Location |
 | --- | --- | --- |
 | ~~P0 (gate)~~ | ~~No executable cross-tenant isolation test~~: the database layer is now covered (§6b). The API layer is not yet. | `tests/db/` |
-| P1 | The live schema has drifted from the repo: `receptionist_configs` exists only outside the migrations (§6d). All three Supabase projects are **paused**, so the live schema could not be compared | Supabase |
+| P1 | **Live:** job photo storage is broken. The code uses bucket `jobrin-assets`; live only has `vantory-assets` (§6f, step 5) | `server/routes/operations.ts`, `0026` |
+| P1 | **Live:** every workspace member can `SELECT` `integrations.encrypted_credentials` (0 rows today). Fixed by the reconciliation migration once applied | live grant, `20261105000000` |
+| ~~P1~~ | ~~Schema drift could not be checked~~: compared in §6f. `receptionist_configs` does not exist on live either, so the `0026` guard (§6d) is correct | Supabase |
 | P1 | The Node/Docker ConversationRelay upgrade skips Twilio signature validation (token only) | `server/ws/receptionistSocket.ts` |
 | P1 | Inviting an existing Jobrin user is impossible (`EMAIL_ALREADY_REGISTERED`) | `server/routes/team.ts` |
 | P1 | Members are inserted `active` before the invitee accepts; there is no pending state, revoke or resend | `server/routes/team.ts`, `workspace_members.status` |
