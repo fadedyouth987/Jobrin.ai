@@ -69,9 +69,18 @@ alter table public.revenue_attributions
   add constraint revenue_attributions_touch_type_check
   check (touch_type in ('first_touch','last_touch','assisted','jobrin_generated'));
 
-alter table public.receptionist_configs
-  alter column display_name set default 'Jobrin.ai Receptionist';
+-- public.receptionist_configs is a legacy table that no migration in this
+-- repository creates (the application uses receptionist_profiles). Guarded so
+-- a fresh database can be built from these migrations; where the table exists
+-- the statements are unchanged.
+do $$
+begin
+  if to_regclass('public.receptionist_configs') is not null then
+    alter table public.receptionist_configs
+      alter column display_name set default 'Jobrin.ai Receptionist';
 
-update public.receptionist_configs
-set display_name = 'Jobrin.ai Receptionist'
-where display_name = 'Jobryn Receptionist';
+    update public.receptionist_configs
+    set display_name = 'Jobrin.ai Receptionist'
+    where display_name = 'Jobryn Receptionist';
+  end if;
+end $$;
