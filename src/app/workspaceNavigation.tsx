@@ -4,7 +4,7 @@ import {
   CircleDollarSign, ClipboardList, ContactRound, CreditCard, FileCheck2, FileText, Globe,
   Home, Inbox, LibraryBig, MapPin, MessageSquareMore, Package, Phone,
   PhoneCall, PlugZap, ReceiptText, Repeat, Settings, ShieldAlert, ShieldCheck, Star,
-  Truck, UserRoundPlus, Users, Voicemail, Workflow,
+  Truck, UserRoundPlus, Users, Voicemail, Workflow, EyeOff,
 } from 'lucide-react';
 import {
   AdminChatPage, AnalyticsPage, ApprovalsPage, AutomationsPage, BillingPage, BusinessProfileSettingsPage, CapabilityMapPage,
@@ -20,6 +20,9 @@ import { CustomerDetailPage, JobDetailPage } from '../pages/OperationalDetailPag
 import { RecurringJobsPage, TimeMaterialsLogPage } from '../pages/FieldOpsPages';
 import { PurchasingPage } from '../pages/PurchasingPage';
 import { SchedulePage } from '../pages/SchedulePage';
+import { AppLink } from './router';
+import { EmptyState } from '../components/saas/ui';
+import { HIDEABLE_AREAS, areaForPath, isPathVisible, type WorkspaceFeatures } from '../../shared/features';
 
 export type NavItem = [string, string, React.ComponentType<{ className?: string }>, boolean?];
 export type NavGroup = { label: string; items: NavItem[] };
@@ -107,12 +110,58 @@ export const primaryRail: NavItem[] = [
   ['/app/admin-chat', 'AI Admin chat', MessageSquareMore],
 ];
 
-export function visibleWorkspaceGroups(role?: string | null): NavGroup[] {
-  if (role !== 'staff') return workspaceNavGroups;
-  return workspaceNavGroups.map((group) => ({
-    ...group,
-    items: group.items.filter(([href]) => !staffRestrictedPaths.has(href)),
-  }));
+// Role filtering (staff) plus the workspace's product surface: areas the
+// workspace has hidden (shared/features.ts) disappear from every menu, and a
+// group left with no items is dropped. Visibility only — the API keeps its
+// own role and entitlement checks.
+export function visibleWorkspaceGroups(role?: string | null, features?: WorkspaceFeatures | null): NavGroup[] {
+  return workspaceNavGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(([href]) => (role !== 'staff' || !staffRestrictedPaths.has(href)) && isPathVisible(href, features)),
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
+// Surfaces that take an empty rail slot when a primary one is hidden, so the
+// receptionist-first surface still leads with what it is for.
+const railFallbacks: NavItem[] = [
+  ['/app/leads', 'Leads', BriefcaseBusiness],
+  ['/app/operator/phone', 'AI Receptionist', Phone],
+  ['/app/brain', 'Business Brain', Brain],
+];
+
+function fillVisible(primary: NavItem[], fallbacks: NavItem[], size: number, visible: (href: string) => boolean): NavItem[] {
+  const items = primary.filter(([href]) => visible(href));
+  for (const item of fallbacks) {
+    if (items.length >= size) break;
+    if (visible(item[0]) && !items.some(([href]) => href === item[0])) items.push(item);
+  }
+  return items.slice(0, size);
+}
+
+const restrictedFor = (role?: string | null) => (href: string) => role !== 'staff' || !staffRestrictedPaths.has(href);
+
+export function visibleRail(role?: string | null, features?: WorkspaceFeatures | null): NavItem[] {
+  const allowed = restrictedFor(role);
+  return fillVisible(primaryRail, railFallbacks, primaryRail.length, (href) => allowed(href) && isPathVisible(href, features));
+}
+
+// Phone bottom bar: four tabs plus "More".
+const mobilePrimary: NavItem[] = [
+  ['/app', 'Today', Home],
+  ['/app/admin-chat', 'Admin', MessageSquareMore],
+  ['/app/inbox', 'Inbox', Inbox],
+  ['/app/schedule', 'Schedule', CalendarDays],
+];
+const mobileFallbacks: NavItem[] = [
+  ['/app/leads', 'Leads', BriefcaseBusiness],
+  ['/app/operator/phone', 'Receptionist', Phone],
+];
+
+export function visibleMobileTabs(role?: string | null, features?: WorkspaceFeatures | null): NavItem[] {
+  const allowed = restrictedFor(role);
+  return fillVisible(mobilePrimary, mobileFallbacks, mobilePrimary.length, (href) => allowed(href) && isPathVisible(href, features));
 }
 
 export function pageTitle(path: string) {
@@ -122,7 +171,19 @@ export function pageTitle(path: string) {
   return item?.[1] || 'Jobrin.ai';
 }
 
-export function routeWorkspacePage(path: string) {
+function AreaHiddenPage({ path }: { path: string }) {
+  const area = areaForPath(path);
+  const label = area ? HIDEABLE_AREAS[area].label : 'This area';
+  return <EmptyState
+    icon={<EyeOff className="h-5 w-5"/>}
+    title={`${label} is turned off for this workspace`}
+    description="This workspace is set up around the AI receptionist, so this area is hidden to keep things simple. Nothing has been deleted — contact Jobrin.ai if you need it switched on."
+    action={<AppLink href="/app/leads" className="inline-flex rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white">Go to leads</AppLink>}
+  />;
+}
+
+export function routeWorkspacePage(path: string, features?: WorkspaceFeatures | null) {
+  if (!isPathVisible(path, features)) return <AreaHiddenPage path={path}/>;
   const receptionistMatch = path.match(/^\/app\/operator\/phone(?:\/(configure|handling|knowledge|test|calls|insights))?$/);
   if (receptionistMatch) return <ReceptionistPage/>;
   const jobMatch = path.match(/^\/app\/jobs\/([0-9a-f-]{36})$/i);

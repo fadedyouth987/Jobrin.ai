@@ -3,6 +3,7 @@ import type { Session, User } from '@supabase/supabase-js';
 import { apiFetch } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { navigate } from './router';
+import type { WorkspaceFeatures } from '../../shared/features';
 
 export type WorkspaceSummary = {
   id: string;
@@ -11,6 +12,9 @@ export type WorkspaceSummary = {
   plan: 'starter'|'growth'|'operator';
   role: string;
   created_at: string;
+  // Which product areas to show; absent from an older API, which means the
+  // full product (see shared/features.ts).
+  features?: WorkspaceFeatures;
 };
 
 type AuthState = {

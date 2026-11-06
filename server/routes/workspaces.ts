@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncRoute, validateBody } from '../security';
+import { FULL_PRODUCT_FEATURES, resolveWorkspaceFeatures, type WorkspaceFeatures } from '../../shared/features';
 import {
   allowPendingWorkspaceDeletion,
   createUserClient,
@@ -69,7 +70,27 @@ router.get('/', requireAuth, asyncRoute(async (req: AuthenticatedRequest, res) =
     const workspace = Array.isArray(row.workspaces) ? row.workspaces[0] : row.workspaces;
     return workspace ? [{ ...workspace, role: row.role }] : [];
   });
-  res.json({ workspaces });
+
+  // Which product areas each workspace shows (shared/features.ts). Read
+  // separately and fail open to the full product: if the columns are missing
+  // (code deployed before the migration) or the read fails, nothing that
+  // works today may disappear.
+  const featuresById = new Map<string, WorkspaceFeatures>();
+  if (workspaces.length) {
+    const { data: featureRows, error: featureError } = await db
+      .from('workspaces')
+      .select('id,product_surface,feature_overrides')
+      .in('id', workspaces.map((workspace: any) => workspace.id));
+    if (featureError) {
+      console.warn(JSON.stringify({ level: 'warn', component: 'workspace_features', message: 'Feature read failed; showing full product', requestId: req.requestId, code: featureError.code ?? null }));
+    }
+    for (const row of featureRows ?? []) {
+      featuresById.set(row.id, resolveWorkspaceFeatures(row.product_surface, row.feature_overrides));
+    }
+  }
+  res.json({
+    workspaces: workspaces.map((workspace: any) => ({ ...workspace, features: featuresById.get(workspace.id) ?? FULL_PRODUCT_FEATURES })),
+  });
 }));
 
 router.post('/', requireAuth, validateBody(z.object({

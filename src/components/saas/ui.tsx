@@ -1,5 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppLink, navigate } from '../../app/router';
+import { useAuth } from '../../app/auth';
+import { isPathVisible } from '../../../shared/features';
 
 export function Spinner({ label = 'Loading' }: { label?: string }) {
   return <div className="flex min-h-[220px] items-center justify-center gap-3 text-sm text-slate-500"><span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600" />{label}</div>;
@@ -22,6 +24,10 @@ export function aiAdminHref(prompt: string) {
 }
 
 export function AskAiAdminLink({ prompt, label = 'Ask AI Admin', className = '' }: { prompt: string; label?: string; className?: string }) {
+  // Workspaces on the receptionist-first surface hide AI Admin chat; a link
+  // there would only land on the "turned off" page.
+  const { workspace } = useAuth();
+  if (!isPathVisible('/app/admin-chat', workspace?.features)) return null;
   return <AppLink href={aiAdminHref(prompt)} className={`inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100 ${className}`}>{label}</AppLink>;
 }
 

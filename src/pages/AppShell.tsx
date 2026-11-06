@@ -1,14 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Bell, CalendarDays, ChevronDown, Home, Inbox, KeyRound, LayoutGrid, LogOut, Menu,
-  MessageSquareMore, Moon, Search, Sun, X
+  Bell, ChevronDown, KeyRound, LayoutGrid, LogOut, Menu, Moon, Search, Sun, X
 } from 'lucide-react';
 import { useAuth } from '../app/auth';
 import { AppLink, navigate, usePathname } from '../app/router';
 import { logoutUser } from '../lib/supabase';
 import { apiFetch } from '../lib/api';
 import { useTheme } from '../app/theme';
-import { primaryRail, routeWorkspacePage, visibleWorkspaceGroups, type NavItem } from '../app/workspaceNavigation';
+import { routeWorkspacePage, visibleMobileTabs, visibleRail, visibleWorkspaceGroups, type NavItem } from '../app/workspaceNavigation';
 
 function CommandPalette({ items, onClose }: { items: NavItem[]; onClose: () => void }) {
   const [query,setQuery]=useState('');
@@ -104,10 +103,13 @@ export default function AppShell() {
   },[]);
   if(auth.loading||!auth.session||!auth.workspaceId||!subscriptionChecked)return <div className="jobrin-loading flex min-h-screen items-center justify-center text-sm text-[color:var(--jobrin-muted)]">Loading secure workspace…</div>;
 
-  const visibleGroups=visibleWorkspaceGroups(auth.workspace?.role);
+  const features=auth.workspace?.features;
+  const visibleGroups=visibleWorkspaceGroups(auth.workspace?.role,features);
+  const railItems=visibleRail(auth.workspace?.role,features);
+  const mobileTabs=visibleMobileTabs(auth.workspace?.role,features);
   const paletteItems: NavItem[] = visibleGroups.flatMap((group)=>group.items);
   const isActive=(href:string)=>path===href||(href!=='/app'&&path.startsWith(`${href}/`));
-  const content = routeWorkspacePage(path);
+  const content = routeWorkspacePage(path,features);
   return <div className="jobrin-workspace min-h-screen bg-[color:var(--jobrin-canvas)] text-[color:var(--jobrin-ink)]">
     <a href="#main-content" className="skip-link">Skip to content</a>
     {paletteOpen&&<CommandPalette items={paletteItems} onClose={()=>setPaletteOpen(false)}/>}
@@ -134,7 +136,7 @@ export default function AppShell() {
     </header>
     {/* Cockpit rail: seven primary surfaces; everything else lives in the palette. */}
     <nav aria-label="Primary areas" className="jobrin-rail fixed bottom-0 left-0 top-14 z-40 hidden w-16 flex-col items-center gap-1 py-3 lg:flex">
-      {primaryRail.map(([href,label,Icon])=>{const active=isActive(href);return <AppLink key={href} href={href} title={label} className={`jobrin-rail-item ${active?'is-active':''}`}><Icon className="h-[18px] w-[18px]"/><span>{label}</span></AppLink>})}
+      {railItems.map(([href,label,Icon])=>{const active=isActive(href);return <AppLink key={href} href={href} title={label} className={`jobrin-rail-item ${active?'is-active':''}`}><Icon className="h-[18px] w-[18px]"/><span>{label}</span></AppLink>})}
       <button onClick={()=>setPaletteOpen(true)} title="Everything else (Ctrl+K)" className="jobrin-rail-item"><LayoutGrid className="h-[18px] w-[18px]"/><span>More</span></button>
     </nav>
     {/* Mobile drawer keeps the full grouped map, restyled to the cockpit chrome. */}
@@ -146,7 +148,7 @@ export default function AppShell() {
     </aside>}
     <div className="pt-14 lg:pl-16 pb-16 lg:pb-0"><main id="main-content" tabIndex={-1} className="jobrin-main mx-auto max-w-[1500px] p-4 sm:p-6 lg:p-8">{content}</main></div>
     <nav className="jobrin-bottom-nav fixed inset-x-0 bottom-0 z-30 flex border-t border-[color:var(--jobrin-chrome-border)] bg-[color:var(--jobrin-chrome)] lg:hidden">
-      {([['/app','Today',Home],['/app/admin-chat','Admin',MessageSquareMore],['/app/inbox','Inbox',Inbox],['/app/schedule','Schedule',CalendarDays]] as NavItem[]).map(([href,label,Icon])=>{const active=isActive(href);const featured=href==='/app/admin-chat';return <AppLink key={href} href={href} className={`jobrin-bottom-link flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold ${active?'is-active text-[color:var(--jobrin-rail-active)]':'text-[color:var(--jobrin-chrome-muted)]'} ${featured?'is-featured':''}`}><Icon className="h-4 w-4"/>{label}</AppLink>})}
+      {mobileTabs.map(([href,label,Icon])=>{const active=isActive(href);const featured=href==='/app/admin-chat';return <AppLink key={href} href={href} className={`jobrin-bottom-link flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold ${active?'is-active text-[color:var(--jobrin-rail-active)]':'text-[color:var(--jobrin-chrome-muted)]'} ${featured?'is-featured':''}`}><Icon className="h-4 w-4"/>{label}</AppLink>})}
       <button onClick={()=>setMobile(true)} className="flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold text-[color:var(--jobrin-chrome-muted)]"><LayoutGrid className="h-4 w-4"/>More</button>
     </nav>
   </div>;
