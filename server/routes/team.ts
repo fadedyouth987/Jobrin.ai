@@ -74,14 +74,18 @@ router.post('/invites', requireRole('owner', 'admin'), requireSensitiveAuth, val
   const userId = invite.data?.user?.id ?? null;
   if (!userId) return res.status(502).json({ error: 'INVITE_SEND_FAILED' });
 
-  const { data: members, error: memberReadError } = await supabaseAdmin
-    .from('workspace_members')
-    .select('user_id')
-    .eq('workspace_id', req.workspaceId!);
-  if (memberReadError) return res.status(500).json({ error: 'TEAM_LIST_FAILED' });
-  if (members?.some((member: any) => member.user_id === userId)) {
-    return res.status(409).json({ error: 'ALREADY_A_MEMBER' });
-  }
+  // inviteUserByEmail only succeeds for an email with no existing login (an
+  // existing one returns "already been registered" above), so this auth user
+  // was created by this request. If the workspace membership cannot be
+  // recorded, remove it again: an orphaned invitee would otherwise hold a
+  // live setup link to no workspace, and every retry would be refused as
+  // EMAIL_ALREADY_REGISTERED.
+  const rollbackInvitedUser = async () => {
+    const { error: rollbackError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    if (rollbackError) {
+      console.error(JSON.stringify({ level: 'error', component: 'team_invite', message: 'Invite rollback failed; orphaned auth user', requestId: req.requestId, userId }));
+    }
+  };
 
   if (req.body.display_name) {
     await supabaseAdmin.from('profiles').upsert({ id: userId, display_name: req.body.display_name });
@@ -90,7 +94,10 @@ router.post('/invites', requireRole('owner', 'admin'), requireSensitiveAuth, val
     .from('workspace_members')
     .insert({ workspace_id: req.workspaceId!, user_id: userId, role: req.body.role, status: 'active' })
     .select('user_id,role,status,created_at').single();
-  if (insertError) return res.status(400).json({ error: 'TEAM_MEMBER_CREATE_FAILED', message: insertError.message });
+  if (insertError) {
+    await rollbackInvitedUser();
+    return res.status(500).json({ error: 'TEAM_MEMBER_CREATE_FAILED' });
+  }
 
   await writeAudit(req, 'team.member_invited', 'workspace_member', userId, { role: req.body.role }, 'warning');
   res.status(201).json({ member, invited: true });
