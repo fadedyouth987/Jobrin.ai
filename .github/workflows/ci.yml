@@ -19,3 +19,14 @@ jobs:
       - run: npm test
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run build
+  database:
+    # Applies every migration to a throwaway PostgreSQL and runs the RLS /
+    # cross-workspace isolation suite in tests/db (no Supabase credentials).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-16 postgresql-16-pgvector
+      - run: npm run test:db
