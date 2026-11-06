@@ -10,6 +10,7 @@ import { mergeNumberOverrides, type WorkspacePhoneNumberRow } from '../phoneNumb
 import { asyncRoute, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireSensitiveAuth, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
 import { twilioSignatureGuard } from './communications';
+import { completeReceptionistCall } from '../receptionist/callOutcome';
 
 const router = Router();
 const webhookRouter = Router();
@@ -34,6 +35,9 @@ const profileSchema = z.object({
   max_calls_per_caller_hour: z.number().int().min(1).max(6),
   max_call_minutes: z.number().int().min(5).max(30),
   max_call_turns: z.number().int().min(10).max(80),
+  // Where "new job" texts go; falls back to the transfer number when unset.
+  // Optional so a client that does not know the field leaves it untouched.
+  owner_alert_number: z.string().trim().regex(/^\+[1-9]\d{7,14}$/).nullable().optional(),
 });
 
 function websocketUrl() {
@@ -252,6 +256,16 @@ webhookRouter.post('/voice/complete', twilioSignatureGuard('/api/twilio/voice/co
     const transfer = handoff?.kind === 'warm_transfer' && profile?.allow_warm_transfer ? profile.transfer_number : null;
     const status = transfer ? 'transferring' : String(req.body.SessionStatus ?? req.body.CallStatus ?? 'completed');
     await supabaseAdmin.from('calls').update({ status, ended_at: transfer ? null : new Date().toISOString(), duration_seconds: Number(req.body.SessionDuration || 0) }).eq('provider','twilio').eq('provider_call_id',callSid);
+    // Second call-end path: if the conversation socket dropped without a
+    // clean close, this still leaves the call's one lead and owner alert.
+    // Idempotent with the socket-close path (enforced in the database).
+    if (call) {
+      try {
+        await completeReceptionistCall(call.workspace_id, callSid);
+      } catch {
+        // Logged inside; Twilio must still get its TwiML.
+      }
+    }
     if (transfer) response.dial({ answerOnBridge: true }, transfer);
   }
   res.type('text/xml').send(response.toString());

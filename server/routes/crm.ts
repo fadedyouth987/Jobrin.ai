@@ -99,15 +99,19 @@ router.get('/leads', asyncRoute(async (req: AuthenticatedRequest, res) => {
   const stage = String(req.query.stage || '').trim();
   const limit = 200;
   const cursor = parseCursor(req.query.cursor);
-  let query = db.from('leads')
-    .select('id,title,description,stage,source,estimated_value_cents,owner_user_id,created_at,updated_at,customer_id,customers(display_name,phone,email),service_id,services(name)')
-    .eq('workspace_id', req.workspaceId!)
-    .is('deleted_at', null);
-  if (stage) query = query.eq('stage', stage);
-  query = applyKeysetCursor(query, cursor);
-  const { data, error } = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
+  const baseColumns = 'id,title,description,stage,source,estimated_value_cents,owner_user_id,created_at,updated_at,customer_id,customers(display_name,phone,email),service_id,services(name)';
+  const run = (columns: string) => {
+    let query = db.from('leads').select(columns).eq('workspace_id', req.workspaceId!).is('deleted_at', null);
+    if (stage) query = query.eq('stage', stage);
+    query = applyKeysetCursor(query, cursor);
+    return query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
+  };
+  // Receptionist capture columns (migration 20261106010000). If the code is
+  // deployed before that migration, fall back rather than break the list.
+  let { data, error } = await run(`${baseColumns},call_id,suburb,job_type,urgency`);
+  if (error) ({ data, error } = await run(baseColumns));
   if (error) return res.status(500).json({ error: 'LEAD_LIST_FAILED' });
-  const { page, nextCursor, hasMore } = buildPage(data ?? [], limit);
+  const { page, nextCursor, hasMore } = buildPage((data ?? []) as unknown as Array<Record<string, unknown> & { id: string }>, limit);
   res.json({ leads: page, nextCursor, hasMore });
 }));
 

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { env } from '../env';
 import { openaiConfigured } from '../providers/openai';
 import { consumeWorkspaceUsageForWorkspace, supabaseAdmin, writeNotification } from '../supabase';
+import { completeReceptionistCall, isRealCallSid, recordCallLead } from '../receptionist/callOutcome';
 
 // The signed real-time conversation layer for the AI receptionist — and the
 // unified office-admin brain: one session engine, worn as different hats
@@ -121,6 +122,8 @@ function modeInstructions(mode: AdminMode): string[] {
     default:
       return [
         'You are currently wearing the RECEPTIONIST hat: answer the call, take messages, make booking suggestions, and keep the caller comfortable. Do not discuss invoicing, marketing or anything outside a phone receptionist\'s duties.',
+        'For every new job enquiry, naturally collect (one question at a time): the caller\'s name, the best number to call back, the suburb of the job, what the job is, and how urgent it is. Then call take_message with what you have, even if some details are missing, and read the key details back to confirm.',
+        'Urgency: "emergency" only for an active hazard or damage happening now (e.g. a burst pipe flooding, no power, a gas smell - always also tell them to call 000 if anyone is in danger); "urgent" when they need someone today or tomorrow; otherwise "routine".',
       ];
   }
 }
@@ -276,8 +279,11 @@ const TAKE_MESSAGE_TOOL = {
       required: ['reason'],
       properties: {
         callback_number: { type: 'string', description: 'Best contact number, in international format if possible.' },
-        reason: { description: 'What the caller needs and any agreed time.', type: 'string' },
+        reason: { description: 'What the caller needs and any agreed time, in one or two sentences.', type: 'string' },
         caller_name: { description: 'Caller name if known.', type: 'string' },
+        suburb: { description: 'Suburb where the job is, if given.', type: 'string' },
+        job_type: { description: 'Short label for the job, e.g. "Burst pipe" or "Power outage". Under six words.', type: 'string' },
+        urgency: { description: 'emergency, urgent or routine (see your instructions).', type: 'string', enum: ['emergency', 'urgent', 'routine'] },
       },
     },
   },
@@ -311,37 +317,54 @@ function providerUnavailableReply(mode: AdminMode): string {
 
 // ---------- Persistence (best-effort, fail-closed without secrets) ----------
 
-async function recordMessageTake(context: CallContext, fromNumber: string | null, args: { callback_name?: string; callback_number?: string; reason?: string }, idempotencyKey: string): Promise<string> {
+type MessageTakeArgs = { callback_name?: string; caller_name?: string; callback_number?: string; reason?: string; suburb?: string; job_type?: string; urgency?: string };
+
+async function recordMessageTake(context: CallContext, callSid: string, fromNumber: string | null, args: MessageTakeArgs, idempotencyKey: string): Promise<string> {
+  // The tool schema names it caller_name; callback_name is accepted for older transcripts.
+  const callerName = args.caller_name || args.callback_name || null;
   const note = `Receptionist message take — caller ${fromNumber || 'unknown'}: ${args.reason || 'no reason captured'} (callback: ${args.callback_number || fromNumber || 'not provided'})`.slice(0, 1000);
   try {
-    let customerId: string | null = null;
-    if (fromNumber) {
-      const { data: existing } = await supabaseAdmin.from('customers').select('id').eq('workspace_id', context.workspaceId).eq('normalized_phone', fromNumber).is('deleted_at', null).maybeSingle();
-      customerId = existing?.id ?? null;
-      if (!customerId) {
-        const created = await supabaseAdmin.from('customers').insert({ workspace_id: context.workspaceId, display_name: args.callback_name || fromNumber, phone: fromNumber, normalized_phone: fromNumber, source: 'receptionist' }).select('id').single();
-        customerId = created.data?.id ?? null;
+    let leadId: string | null = null;
+    if (isRealCallSid(callSid)) {
+      // A live call: merge into the call's single lead (one lead per call,
+      // however many messages are taken; see callOutcome.ts).
+      leadId = await recordCallLead(context.workspaceId, callSid, {
+        callerName, callbackNumber: args.callback_number ?? null, suburb: args.suburb ?? null,
+        jobType: args.job_type ?? null, urgency: args.urgency ?? null, note: args.reason ?? null,
+      });
+      if (!leadId) return 'Callback task recorded locally.';
+    } else {
+      // Text simulator: no calls row exists, so keep the per-turn record.
+      let customerId: string | null = null;
+      if (fromNumber) {
+        const { data: existing } = await supabaseAdmin.from('customers').select('id').eq('workspace_id', context.workspaceId).eq('normalized_phone', fromNumber).is('deleted_at', null).maybeSingle();
+        customerId = existing?.id ?? null;
+        if (!customerId) {
+          const created = await supabaseAdmin.from('customers').insert({ workspace_id: context.workspaceId, display_name: callerName || fromNumber, phone: fromNumber, normalized_phone: fromNumber, source: 'receptionist' }).select('id').single();
+          customerId = created.data?.id ?? null;
+        }
       }
-    }
-    const lead = await supabaseAdmin.from('leads').insert({
-      workspace_id: context.workspaceId, customer_id: customerId,
-      title: 'Callback request — AI receptionist',
-      description: note, source: 'receptionist', source_detail: { receptionist_idempotency_key: idempotencyKey },
-    }).select('id').single();
-    if (lead.error) {
-      const existing = await supabaseAdmin.from('leads').select('id')
-        .eq('workspace_id', context.workspaceId).eq('source', 'receptionist')
-        .contains('source_detail', { receptionist_idempotency_key: idempotencyKey }).maybeSingle();
-      if (!existing.data) throw lead.error;
-      return 'Callback task already exists for this call.';
+      const lead = await supabaseAdmin.from('leads').insert({
+        workspace_id: context.workspaceId, customer_id: customerId,
+        title: 'Callback request — AI receptionist',
+        description: note, source: 'receptionist', source_detail: { receptionist_idempotency_key: idempotencyKey },
+      }).select('id').single();
+      if (lead.error) {
+        const existing = await supabaseAdmin.from('leads').select('id')
+          .eq('workspace_id', context.workspaceId).eq('source', 'receptionist')
+          .contains('source_detail', { receptionist_idempotency_key: idempotencyKey }).maybeSingle();
+        if (!existing.data) throw lead.error;
+        return 'Callback task already exists for this call.';
+      }
+      leadId = lead.data?.id ?? null;
     }
     await supabaseAdmin.from('ai_actions').insert({
       workspace_id: context.workspaceId, requested_by: 'receptionist', actor_type: 'receptionist_voice',
       tool_name: 'message.take', risk_level: 'low', input: {},
-      approval_required: false, status: 'completed', output: { leadId: lead.data?.id ?? null },
+      approval_required: false, status: 'completed', output: { leadId },
     });
-    await writeNotification(context.workspaceId, 'receptionist.message_taken', 'AI receptionist took a callback request', note, 'lead', lead.data?.id ?? null);
-    return `Callback task created (lead ${lead.data?.id ? 'saved' : 'pending'}).`;
+    await writeNotification(context.workspaceId, 'receptionist.message_taken', 'AI receptionist took a callback request', note, 'lead', leadId ?? undefined);
+    return `Callback task created (lead ${leadId ? 'saved' : 'pending'}).`;
   } catch {
     return 'Callback task recorded locally.';
   }
@@ -533,7 +556,7 @@ export class ReceptionistSession {
       if (this.pendingMessageTake && userText.trim().length >= 6) {
         this.pendingMessageTake = false;
         this.messageTaken = true;
-        const note = await recordMessageTake(this.context ?? { workspaceId: this.workspaceId } as unknown as CallContext, this.fromNumber, { reason: userText.slice(0, 500) }, `receptionist:${this.callSid}:message:${this.turnNumber}`);
+        const note = await recordMessageTake(this.context ?? { workspaceId: this.workspaceId } as unknown as CallContext, this.callSid, this.fromNumber, { reason: userText.slice(0, 500) }, `receptionist:${this.callSid}:message:${this.turnNumber}`);
         const reply = `Thank you — I have passed that to the team. They will be in touch.`;
         this.pushTranscript('receptionist', reply);
         return { reply, configured: false, messageTaken: true, note };
@@ -591,9 +614,9 @@ export class ReceptionistSession {
         }
       }
       if (call.function.name === 'take_message') {
-        let args: { callback_name?: string; callback_number?: string; reason?: string } = {};
+        let args: MessageTakeArgs = {};
         try { args = JSON.parse(call.function.arguments || '{}'); } catch { args = {}; }
-        const note = await recordMessageTake(this.context!, this.fromNumber, args, `receptionist:${this.callSid}:message:${this.turnNumber}`);
+        const note = await recordMessageTake(this.context!, this.callSid, this.fromNumber, args, `receptionist:${this.callSid}:message:${this.turnNumber}`);
         this.messageTaken = true;
         messages.push(assistantMessage as never);
         messages.push({ role: 'tool', tool_call_id: call.id, content: `Message recorded for the team. Confirm to the caller in one short sentence.` });
@@ -633,6 +656,14 @@ export class ReceptionistSession {
       await writeNotification(this.workspaceId, 'receptionist.call_handled', 'AI receptionist handled a call', this.messageTaken ? 'A callback request was captured for the team.' : 'The call ended without a retained transcript.');
     } catch {
       // Without the service-role key the summary stays in memory only.
+    }
+    // Every answered call leaves exactly one lead and one owner alert, even a
+    // hang-up before any message was taken. Idempotent: /voice/complete runs
+    // the same step.
+    try {
+      await completeReceptionistCall(this.workspaceId, this.callSid);
+    } catch {
+      // Logged inside; never let call teardown throw.
     }
     return finalSummary;
   }
