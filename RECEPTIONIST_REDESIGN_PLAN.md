@@ -234,27 +234,59 @@ migration creates. A fresh database (including any new staging project)
 therefore failed at `0026`. Those two statements now run only if the table
 exists. That changes nothing on a database that has the table.
 
+### 6e. feat(receptionist): one job and one owner text per call
+
+- **Database** (`20261106010000_receptionist_call_outcomes.sql`, additive):
+  - `leads` gains `call_id`, `suburb`, `job_type` and `urgency`, with
+    `unique (workspace_id, call_id)` and a cross-workspace reference trigger.
+  - `receptionist_profiles.owner_alert_number` is added.
+  - New `alert_deliveries` table: readable by members, written only by the server.
+  - Two server-only functions:
+    - `record_receptionist_call_lead` creates or merges the call's single
+      lead and never resets a stage the owner has already moved.
+    - `claim_alert_delivery` returns a send right exactly once.
+- **Server** (`server/receptionist/callOutcome.ts`): records the lead, claims
+  the alert, then texts the owner. The text goes to `owner_alert_number`, or
+  the transfer number if that is unset, and is sent from the number the caller
+  rang. Every outcome (sent, skipped with a reason, or failed with the Twilio
+  code) is recorded. It runs from the WebSocket close in both runtimes and
+  from `/voice/complete`.
+- **Engine:** the `take_message` tool now captures suburb, job type and
+  urgency. Existing bug fixed: the tool's `caller_name` was read as
+  `callback_name`, so callers' names were never saved.
+- **SMS text** (`server/receptionist/ownerAlert.ts`): limited to the GSM-7
+  character set, at most 3 segments, with Australian number formatting. The
+  callback number and the link to the jobs list are never cut off.
+- **App:** lead cards show Emergency or Urgent, the caller's name and a
+  tap-to-call number. The Receptionist settings gain the alert-number field.
+  The leads list falls back to the old columns if code is deployed before the
+  migration.
+
+**Verification:**
+- 27 PostgreSQL tests (`tests/db/receptionist-call-outcomes.test.sql`),
+  including a **real two-connection race**. I checked that the race test can
+  fail: a naive check-then-insert version produced 2 leads and 2 alerts.
+- 8 orchestration tests with injected fakes (`tests/callOutcome.test.ts`).
+- 10 SMS-text and wiring tests (`tests/ownerAlert.test.ts`).
+- 6 browser checks of the lead cards and the settings field.
+- **Not tested against live Supabase or Twilio.**
+
 ---
 
 ## 7. Phase 1–3, mapped to files
 
-**Phase 1: missed-call catcher**
-- `receptionistCall.ts`: replace the per-turn key with a single
-  `receptionist:<CallSid>` lead per call. In `finalize()`, *always* upsert
-  that lead (even after a hang-up with only a caller number) keyed on
-  `(workspace_id, call_id)`. Extend `TAKE_MESSAGE_TOOL` with `suburb`,
-  `job_type` and `urgency`.
-- New `server/alerts/ownerAlerts.ts`: after the lead upsert, insert into
-  `alert_deliveries (lead_id, kind='owner_new_job')`. Send only if that
-  insert won, which makes retries safe. Send from the workspace's own number
-  (`workspace_phone_numbers`), not the global `TWILIO_PHONE_NUMBER` that
-  `sendSms` uses today.
-- The caller confirmation SMS is transactional. It still goes through the
-  consent/suppression check already used in `communications.ts`.
-- The DO already finalizes on WS close. Also finalize from `/voice/complete`
-  so that a dropped WebSocket still yields a job. Both paths are idempotent
-  through the unique key.
-- The 20-scripted-call gate: extend `smoke-ws.mts` / `e2e-full-journey.mts`.
+**Phase 1: missed-call catcher. Core done (§6e); remaining:**
+- [x] One lead per answered call, including hang-ups, with suburb, job type and urgency captured.
+- [x] One owner "new job" SMS per call, from the number the caller rang.
+- [x] Both call-end paths (socket close, `/voice/complete`) are covered and idempotent.
+- [ ] Caller confirmation SMS. It is transactional but still needs the
+  suppression check from `communications.ts` and a per-workspace on/off switch.
+- [ ] Immediate mid-call alert for `emergency` jobs. Today the alert goes at
+  call end, which is usually within seconds of hang-up.
+- [ ] Alert delivery status on the lead card (the data is in `alert_deliveries`).
+- [ ] The 20-scripted-call gate against a live Twilio number (needs the staging
+  number and credentials): hang-ups, bad audio, mid-call socket drop, duplicate webhooks.
+- [ ] AU number provisioning, forwarding instructions, the setup console and the test-call button.
 
 **Phase 2:** FAQ answering is already constrained to approved context (`fetchCallContext`).
 Calendar read has **no Google/Outlook code at all**, so it is new work.
@@ -275,8 +307,11 @@ follow-ups rather than building a second worker.
 | P1 | The Node/Docker ConversationRelay upgrade skips Twilio signature validation (token only) | `server/ws/receptionistSocket.ts` |
 | P1 | Inviting an existing Jobrin user is impossible (`EMAIL_ALREADY_REGISTERED`) | `server/routes/team.ts` |
 | P1 | Members are inserted `active` before the invitee accepts; there is no pending state, revoke or resend | `server/routes/team.ts`, `workspace_members.status` |
-| P1 | Receptionist leads are per turn, not per call; there is no lead on hang-up and no owner SMS | `server/ai/receptionistCall.ts` |
-| P1 | `sendSms` always sends from the global `TWILIO_PHONE_NUMBER` | `server/providers/twilio.ts` |
+| ~~P1~~ | ~~Receptionist leads are per turn, not per call; there is no lead on hang-up and no owner SMS~~ (fixed, §6e) | `server/ai/receptionistCall.ts` |
+| P2 | `sendSms` still defaults to the global `TWILIO_PHONE_NUMBER`. Owner alerts now pass the workspace number; manual SMS and campaigns do not yet | `server/providers/twilio.ts`, `communications.ts` |
+| P2 | Owner alerts are not counted against the `usage.sms` allowance. They are bounded by the per-caller hourly call limit, but cost per client needs measuring | `server/receptionist/callOutcome.ts` |
+| P2 | An alert claimed just before a crash stays `pending` and is never sent. This is deliberate (a resend could double-text); it is visible in `alert_deliveries` | `alert_deliveries` |
+| P2 | On a phone, the Leads page shows an explainer and three stat cards before the first job. The Phase 1 Jobs-inbox home screen should put jobs first | `LeadsPage` |
 | P2 | There is no platform-admin role, so the setup console needs one (checked server-side and audit-logged) | — |
 | P2 | `ResetPasswordPage` treated "code verifier missing" as fatal even after a successful auto-exchange (fixed as part of §6) | `src/pages/PasswordPages.tsx` |
 | P2 | The Team page cannot show teammates' names: `profiles` RLS only allows reading your own row, but `GET /api/team` reads teammates' profiles through the user's client | `0001` `profiles_self_select`, `server/routes/team.ts` |
@@ -285,8 +320,11 @@ follow-ups rather than building a second worker.
 
 ## 9. Next recommended task
 
-**Phase 1: one job and one owner SMS per call (§7),** together with the
-`leads`/`calls`/`alert_deliveries` migration in §3. Extend `tests/db` with its
-uniqueness and isolation guarantees. Before any real client data, restore a
-Supabase project, compare its schema with the migrations (§8 drift), and apply
-`20261106000000_workspace_product_surface.sql`.
+1. **Staging, before anything else is built on these guarantees:** restore a
+   Supabase project and compare its schema with the migrations (§8 drift).
+   Apply `20261106000000_workspace_product_surface.sql` and
+   `20261106010000_receptionist_call_outcomes.sql` **before** deploying this
+   code, then make a real test call to a Twilio number. This is the first end-to-end check.
+2. **The Phase 1 Jobs-inbox home screen** (§5 tabs): jobs first on a phone,
+   the weekly "jobs captured / booked" card, and alert status on each job.
+3. The caller confirmation SMS, with a suppression check (§7).
