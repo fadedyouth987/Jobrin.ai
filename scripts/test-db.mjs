@@ -55,9 +55,15 @@ function run(cmd, args, { quiet = false } = {}) {
 }
 
 const psqlBin = existsSync(path.join(pgBin, 'psql')) ? path.join(pgBin, 'psql') : 'psql';
-function psqlFile(file) {
-  return spawnSync(psqlBin, ['-h', workDir, '-p', port, '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', file], { encoding: 'utf8' });
+function psqlFile(file, database = TEMPLATE_DB) {
+  return spawnSync(psqlBin, ['-h', workDir, '-p', port, '-U', 'postgres', '-d', database, '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', file], { encoding: 'utf8' });
 }
+function psqlCommand(command) {
+  return spawnSync(psqlBin, ['-h', workDir, '-p', port, '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-c', command], { encoding: 'utf8' });
+}
+// Migrations are applied once to a template; each test file then gets its own
+// fresh copy, so tests cannot depend on (or break) each other's data.
+const TEMPLATE_DB = 'jobrin_migrated';
 
 let started = false;
 let failed = false;
@@ -66,6 +72,8 @@ try {
   run(...serverCmd('pg_ctl', ['-D', dataDir, '-l', path.join(workDir, 'server.log'), '-w', '-o', `-k ${workDir} -p ${port} -c listen_addresses='' -c fsync=off`, 'start']));
   started = true;
 
+  const created = psqlCommand(`create database ${TEMPLATE_DB}`);
+  if (created.status !== 0) throw new Error(`could not create the template database:\n${created.stderr}`);
   const stub = psqlFile(path.join(testsDir, 'supabase-platform-stub.sql'));
   if (stub.status !== 0) throw new Error(`platform stub failed:\n${stub.stderr}`);
 
@@ -77,8 +85,11 @@ try {
   console.log(`applied ${migrations.length} migrations`);
 
   const tests = readdirSync(testsDir).filter((f) => f.endsWith('.test.sql')).sort();
-  for (const file of tests) {
-    const result = psqlFile(path.join(testsDir, file));
+  for (const [index, file] of tests.entries()) {
+    const database = `jobrin_test_${index}`;
+    const copy = psqlCommand(`create database ${database} template ${TEMPLATE_DB}`);
+    if (copy.status !== 0) throw new Error(`could not create ${database}:\n${copy.stderr}`);
+    const result = psqlFile(path.join(testsDir, file), database);
     // Probes report through NOTICEs ("psql:<file>:<line>: NOTICE:  PASS ...").
     const outcomes = `${result.stdout || ''}\n${result.stderr || ''}`.split('\n')
       .map((line) => line.match(/NOTICE:\s+((?:PASS|FAIL)\b.*)$/)?.[1])
@@ -102,7 +113,7 @@ try {
   console.error(String(error instanceof Error ? error.message : error));
 } finally {
   if (keep && started) {
-    console.log(`\ncluster left running: psql -h ${workDir} -p ${port} -U postgres -d postgres`);
+    console.log(`\ncluster left running: psql -h ${workDir} -p ${port} -U postgres -d ${TEMPLATE_DB}  (test copies: jobrin_test_<n>)`);
     console.log(`stop with: ${asRoot ? 'runuser -u postgres -- ' : ''}${path.join(pgBin, 'pg_ctl')} -D ${dataDir} stop`);
     process.exit(failed ? 1 : 0);
   }
