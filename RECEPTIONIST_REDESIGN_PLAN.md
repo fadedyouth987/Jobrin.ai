@@ -62,10 +62,10 @@ the code depends on it.
 | --- | --- | --- |
 | Audit the repo | Done (this document) | — |
 | **Invite flow end to end** | The old bugs are gone: the route uses `inviteUserByEmail` and `invite.data.user.id`, with no `createUser`/`email_confirm`. **Three new defects were found and fixed in this branch** (see §6). | Remaining: inviting someone who **already has a login** returns `EMAIL_ALREADY_REGISTERED`. That blocks one person working in two workspaces, and it blocks you as a platform admin if you also hold a login. Needs a pending-invitation table plus an accept step (P1). |
-| RLS / tenant isolation on receptionist tables | RLS is enabled on `calls`, `leads`, `customers`, `receptionist_profiles`, `workspace_phone_numbers`, `notifications`. Same-workspace FK triggers come from `0004`. The API re-checks membership from the JWT (`requireWorkspace` in `server/supabase.ts`); the `x-workspace-id` header is **not** trusted on its own. | There is **no executable two-workspace isolation test**. All existing tests are source-contract tests. Add an integration suite that runs against a staging Supabase project (needs credentials). |
+| RLS / tenant isolation on receptionist tables | **Done: database layer is tested** (`npm run test:db`, see §6b). All 77 public tables have RLS on, and 40 probes pass. Same-workspace FK triggers come from `0004`. The API re-checks membership from the JWT (`requireWorkspace` in `server/supabase.ts`); the `x-workspace-id` header is **not** trusted on its own. | Remaining: the **API layer** (service-role routes) has no executable cross-tenant test yet. That needs the Express app running against the test database. |
 | Twilio webhook + WS signature validation | HTTP webhooks: yes. Cloudflare WS: yes (`wss://` form). **Node/Docker WS (`server/ws/receptionistSocket.ts`): call token only, no Twilio signature check.** | Add `validateTwilioWebSocket` to the Node upgrade handler, or document that Docker is not a supported voice runtime (P1). |
 | Stripe webhook verification, idempotency, trial, failed payment | Raw-body `constructEvent`, a `claim_stripe_webhook_event` lease RPC, canonical subscription re-fetch, `invoice.payment_failed` → `past_due` with grace (`server/routes/billing.ts`) | Keep. Re-test in Stripe test mode with the new prices (§4). |
-| Feature flags per workspace; hide the "Hide" areas | **No per-workspace flags.** Entitlements are per plan (`shared/plans.ts`) and are enforced server-side through `requireActiveSubscription('<key>')`. Navigation is a static list (`src/app/workspaceNavigation.tsx`). | See §5. |
+| Feature flags per workspace; hide the "Hide" areas | **Done** (§5, §6c). | Plan-driven flags (catcher / receptionist / follow-up) come with the new Stripe plans (§4). |
 
 ---
 
@@ -103,19 +103,35 @@ Stripe price IDs come from `STRIPE_PRICE_STARTER/GROWTH/OPERATOR`
 
 ---
 
-## 5. Hide, don't delete: how to implement it here
+## 5. Hide, don't delete: as implemented
 
-1. Server: add `getWorkspaceFeatures(workspaceId)` = plan entitlements merged
-   with `workspace_features` overrides, using the existing `requireActiveSubscription`.
-2. Expose it on the existing workspace/billing summary the shell already loads.
-3. `src/app/workspaceNavigation.tsx`: add an optional feature key per `NavItem`
-   and filter it in `visibleWorkspaceGroups()`, which already filters by role.
-4. Default **off** for: Pipeline, Quotes/Invoices/Payments, Field Operations,
-   Automations, Marketing/Reviews, Hiring, Purchasing, Reports & attribution,
-   Integrations other than phone, the coming-soon pages and AI Admin chat. Default **on** for:
-   Jobs (leads), Calls, Receptionist (profile + Business Brain subset), Team, Billing and Settings.
-5. Hiding in the nav does not secure anything. A hidden area's API stays
-   gated by its existing entitlement. Nothing is deleted.
+- **Storage:** `workspaces.product_surface` (`receptionist` | `full`) and
+  `workspaces.feature_overrides` (jsonb), added in migration
+  `20261106000000_workspace_product_surface.sql`. Workspaces that already
+  existed were backfilled to `full`, so nothing disappears for them. Workspaces
+  created afterwards start on `receptionist`. The browser cannot write either
+  column; that is enforced by grants and tested.
+- **Areas:** these are defined in `shared/features.ts`. The receptionist surface hides
+  field jobs & operations, quotes/invoices/payments, automations, AI Admin
+  chat + Operator log, marketing & reviews, hiring, reports and the coming-soon pages.
+  It keeps Today, Inbox, Leads, Customers, Schedule, AI Receptionist, Business
+  Brain, Knowledge (the approved FAQs the call engine reads), Approvals,
+  Integrations (number setup), Team, Billing and Settings.
+- **Server:** `GET /api/workspaces` returns `features` for each workspace. It
+  reads the columns separately and falls back to the full product on error,
+  so deploying the code before the migration cannot empty anyone's workspace list.
+- **App:** the rail, the Ctrl+K palette, the phone bottom bar, the phone drawer and the
+  router all filter by features. Typing a hidden URL shows a "turned off for
+  this workspace" page. "Ask AI Admin" buttons disappear when AI Admin is hidden.
+- **This is not an access control.** Each hidden area's API is still gated by its
+  existing role and plan entitlement. Nothing is deleted.
+
+Until the setup console exists, switch a workspace with SQL (service role):
+
+```sql
+update public.workspaces set product_surface = 'full' where slug = '<slug>';
+update public.workspaces set feature_overrides = '{"quotes_invoices": true}' where slug = '<slug>';
+```
 
 The plan's four tabs map onto existing pages:
 
@@ -173,6 +189,53 @@ round-trip is still needed on staging.
 
 ---
 
+### 6b. test(security): executable tenant-isolation suite
+
+`npm run test:db` (`scripts/test-db.mjs`) starts a throwaway local
+PostgreSQL. It applies a stub of the Supabase platform
+(`tests/db/supabase-platform-stub.sql`), which mirrors Supabase's default
+`GRANT ALL` to `anon`/`authenticated` so a missing revoke is caught. It then
+applies **every migration**, and runs `tests/db/tenant-isolation.test.sql` as the
+real `authenticated`/`anon` roles with JWT claims set. The suite covers:
+
+- **Read sweeps** across all 74 tables that have a `workspace_id`, as owner, staff,
+  outsider and anon. Workspace B's files in storage are also checked.
+- **Targeted write attacks** on workspace B: insert, update, delete, move a row,
+  cross-link a record, add yourself as a member, claim a phone route, upload a file.
+- **Blind `UPDATE`/`DELETE` sweeps** (no `WHERE`), which bypass SELECT-policy
+  visibility.
+- **Privilege escalation:** staff promoting themselves or adding members; an
+  owner writing billing state, entitlements or the product surface.
+
+**I checked that the suite can fail.** I planted vulnerabilities in a
+temporary migration: a cross-tenant read policy, a broad grant combined with
+an over-broad UPDATE or DELETE policy, and a grant on the product surface.
+Each one produced a FAIL. Plants without a matching grant were already
+blocked by the existing grants or the `0004` reference triggers. The suite
+also runs as a separate CI job (`database` in `.github/workflows/ci.yml`).
+Note that CI only triggers on pull requests and pushes to `main`.
+
+### 6c. feat(workspace): receptionist-first product surface
+
+See §5. Verification:
+- 9 unit tests (`tests/workspaceFeatures.test.ts`). They caught a real bug
+  before commit: the Operator log path `/app/operator` was prefix-matching
+  `/app/operator/phone`, which would have hidden the AI Receptionist itself.
+- 16 browser checks against the built app with a mocked API: receptionist,
+  full, override and "older API" modes, on desktop and phone.
+- Migration semantics were checked on a real database: a workspace that
+  existed before the migration stays `full`, a later one gets `receptionist`,
+  the browser cannot update either column, and a re-run is harmless.
+
+### 6d. fix(db): migrations can build a fresh database
+
+`0026` altered `public.receptionist_configs`, a legacy table that no
+migration creates. A fresh database (including any new staging project)
+therefore failed at `0026`. Those two statements now run only if the table
+exists. That changes nothing on a database that has the table.
+
+---
+
 ## 7. Phase 1–3, mapped to files
 
 **Phase 1: missed-call catcher**
@@ -207,7 +270,8 @@ follow-ups rather than building a second worker.
 
 | Priority | Finding | Location |
 | --- | --- | --- |
-| P0 (gate) | No executable cross-tenant isolation test; all current tests are source-contract tests | `tests/` |
+| ~~P0 (gate)~~ | ~~No executable cross-tenant isolation test~~: the database layer is now covered (§6b). The API layer is not yet. | `tests/db/` |
+| P1 | The live schema has drifted from the repo: `receptionist_configs` exists only outside the migrations (§6d). All three Supabase projects are **paused**, so the live schema could not be compared | Supabase |
 | P1 | The Node/Docker ConversationRelay upgrade skips Twilio signature validation (token only) | `server/ws/receptionistSocket.ts` |
 | P1 | Inviting an existing Jobrin user is impossible (`EMAIL_ALREADY_REGISTERED`) | `server/routes/team.ts` |
 | P1 | Members are inserted `active` before the invitee accepts; there is no pending state, revoke or resend | `server/routes/team.ts`, `workspace_members.status` |
@@ -215,10 +279,14 @@ follow-ups rather than building a second worker.
 | P1 | `sendSms` always sends from the global `TWILIO_PHONE_NUMBER` | `server/providers/twilio.ts` |
 | P2 | There is no platform-admin role, so the setup console needs one (checked server-side and audit-logged) | — |
 | P2 | `ResetPasswordPage` treated "code verifier missing" as fatal even after a successful auto-exchange (fixed as part of §6) | `src/pages/PasswordPages.tsx` |
+| P2 | The Team page cannot show teammates' names: `profiles` RLS only allows reading your own row, but `GET /api/team` reads teammates' profiles through the user's client | `0001` `profiles_self_select`, `server/routes/team.ts` |
+| P2 | The Today dashboard still presents quotes, invoices and field work. In receptionist mode, links from it land on the "turned off" page until Phase 1 replaces home with the Jobs inbox | `DashboardPage` |
+| P3 | `job_recaps` and `workspace_module_state` still carry Supabase's default `anon` grants. This is inert (no policy admits anon) but is grant noise | `0001_jobrin_core.sql`, `20260914010200_job_recaps.sql` |
 
 ## 9. Next recommended task
 
-**Phase 0, feature flags + navigation (§5),** then **Phase 1, one job and one
-owner SMS per call (§7)**, together with the migration in §3. The
-cross-tenant integration test suite should be written as soon as a staging
-Supabase project's credentials are available. It gates any real client data.
+**Phase 1: one job and one owner SMS per call (§7),** together with the
+`leads`/`calls`/`alert_deliveries` migration in §3. Extend `tests/db` with its
+uniqueness and isolation guarantees. Before any real client data, restore a
+Supabase project, compare its schema with the migrations (§8 drift), and apply
+`20261106000000_workspace_product_surface.sql`.
