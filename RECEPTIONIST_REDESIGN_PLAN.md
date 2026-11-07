@@ -320,6 +320,36 @@ to live. Results:
    be done in SQL), then retire `vantory-assets`.
 6. Then deploy this branch.
 
+### 6g. fix(security): owners and admins can remove a member's access (2026-11-07)
+
+**The defect:** there was no way to revoke a teammate. `server/routes/team.ts`
+only listed and invited members, and `0005` revoked member writes from the
+browser, so a departing employee kept full access to customers, jobs and
+messages until someone edited the database by hand.
+
+- `PATCH /api/team/members/:userId` changes a member's role, or sets
+  `status` to `disabled`/`active`. Disabling works on the member's next
+  request: `requireWorkspace` and every RLS helper (`private.is_workspace_member`,
+  `private.has_workspace_role`) admit only `active` rows. **No migration** was
+  needed. The row is kept, so the audit history stays and access can be restored.
+- Rules live in `shared/teamPolicy.ts` (the API enforces them; the Team page
+  only mirrors them): owners and admins only; nobody changes themselves or
+  the owner; only the owner manages or appoints admins.
+- The route reads and writes only inside the workspace verified from the
+  JWT, needs step-up MFA (`requireSensitiveAuth`), updates conditionally on
+  the role and status it read (`409` on a race), and writes an audit entry
+  (`team.member_disabled` / `member_enabled` / `member_role_changed`).
+- Team page: a role picker and Remove/Restore access with a confirmation
+  that names the person and workspace.
+
+**Verification:** 9 unit and contract tests (`tests/teamMembers.test.ts`).
+6 new database probes in `tests/db/tenant-isolation.test.sql`: a disabled
+member cannot read the workspace or its files, cannot write, and cannot
+re-enable themselves, and restoring access works. I checked that the
+probes fail when access is left active (4 FAILs). 29 browser checks drove
+the built Team page as owner and as admin against a mocked API, on desktop
+and phone. **Not tested against live Supabase.**
+
 ---
 
 ## 7. Phase 1–3, mapped to files
@@ -357,7 +387,12 @@ follow-ups rather than building a second worker.
 | ~~P1~~ | ~~Schema drift could not be checked~~: compared in §6f. `receptionist_configs` does not exist on live either, so the `0026` guard (§6d) is correct | Supabase |
 | P1 | The Node/Docker ConversationRelay upgrade skips Twilio signature validation (token only) | `server/ws/receptionistSocket.ts` |
 | P1 | Inviting an existing Jobrin user is impossible (`EMAIL_ALREADY_REGISTERED`) | `server/routes/team.ts` |
-| P1 | Members are inserted `active` before the invitee accepts; there is no pending state, revoke or resend | `server/routes/team.ts`, `workspace_members.status` |
+| P1 | Members are inserted `active` before the invitee accepts; there is no pending state or resend. (Revoking access now exists, §6g) | `server/routes/team.ts`, `workspace_members.status` |
+| ~~P0~~ | ~~No way to remove a member or change a role~~ (fixed, §6g) | `server/routes/team.ts` |
+| P2 | A customer can accept a quote after its `expires_at`: neither the public decision route nor the database checks it, so stale prices can be accepted | `server/routes/public.ts` `POST /quotes/:token/decision` |
+| P2 | A Stripe event that arrives while an earlier delivery of it is still processing gets HTTP 200 (`inProgress`). Stripe then stops retrying; if the first attempt dies before recording failure, the event is never processed. Returning 409 there would keep Stripe retrying | `server/routes/billing.ts`, `claim_stripe_webhook_event` (`0003`) |
+| P2 | Rate limits use an in-memory store. On Cloudflare each isolate counts separately, so public-link, booking and API limits are per instance, not global | `server/rateLimitStore.ts`, `server/security.ts`, `server/routes/public.ts` |
+| P3 | `npm run lint` is just `tsc --noEmit`; there is no linter (no ESLint rules for React hooks, unused code or unsafe patterns) | `package.json` |
 | ~~P1~~ | ~~Receptionist leads are per turn, not per call; there is no lead on hang-up and no owner SMS~~ (fixed, §6e) | `server/ai/receptionistCall.ts` |
 | P2 | `sendSms` still defaults to the global `TWILIO_PHONE_NUMBER`. Owner alerts now pass the workspace number; manual SMS and campaigns do not yet | `server/providers/twilio.ts`, `communications.ts` |
 | P2 | Owner alerts are not counted against the `usage.sms` allowance. They are bounded by the per-caller hourly call limit, but cost per client needs measuring | `server/receptionist/callOutcome.ts` |
@@ -369,13 +404,48 @@ follow-ups rather than building a second worker.
 | P2 | The Today dashboard still presents quotes, invoices and field work. In receptionist mode, links from it land on the "turned off" page until Phase 1 replaces home with the Jobs inbox | `DashboardPage` |
 | P3 | `job_recaps` and `workspace_module_state` still carry Supabase's default `anon` grants. This is inert (no policy admits anon) but is grant noise | `0001_jobrin_core.sql`, `20260914010200_job_recaps.sql` |
 
-## 9. Next recommended task
+## 9. Prioritised plan (as of 2026-11-07, branch at `4b98611`)
 
-1. **Staging, before anything else is built on these guarantees:** restore a
-   Supabase project and compare its schema with the migrations (§8 drift).
-   Apply `20261106000000_workspace_product_surface.sql` and
-   `20261106010000_receptionist_call_outcomes.sql` **before** deploying this
-   code, then make a real test call to a Twilio number. This is the first end-to-end check.
-2. **The Phase 1 Jobs-inbox home screen** (§5 tabs): jobs first on a phone,
-   the weekly "jobs captured / booked" card, and alert status on each job.
-3. The caller confirmation SMS, with a suppression check (§7).
+Baseline on this commit, all run: `npm run typecheck` ✓, `npm run
+security:check` ✓, `npm test` 218/218 ✓, `npm run build` ✓, `npm run
+test:db` 73/73 ✓ (needs PostgreSQL 16 with `postgresql-16-pgvector`).
+
+**P0: blocks safe use**
+1. **Apply the pending migrations and storage fix to live** (§6f steps 1–6),
+   after confirming a backup. Until then: job photo storage is broken on
+   live, and every member can read `integrations.encrypted_credentials`.
+   Needs the owner's go-ahead; nothing has been applied.
+2. **One real end-to-end run on staging:** invite email round-trip
+   (§6), member removal (§6g), and one Twilio test call producing one lead
+   and one owner SMS (§6e). None of these has touched a live service yet.
+
+**P1: core product**
+3. Pending invitations: a pending state, resend and revoke, and inviting
+   someone who **already has a login** (today `EMAIL_ALREADY_REGISTERED`).
+4. Twilio signature validation on the Node/Docker ConversationRelay upgrade,
+   or declare Docker unsupported for voice (`server/ws/receptionistSocket.ts`).
+5. API-layer cross-tenant test: run the Express app against the test
+   database and probe every route with another workspace's IDs. The
+   database layer is covered; the service-role routes are only covered by
+   review (I swept them on 2026-11-07: workers act on rows they claimed,
+   webhooks are signed and keyed by provider IDs, and nothing trusts a
+   workspace ID from the body).
+6. Phase 1 Jobs-inbox home screen (§5 tabs), then the caller confirmation
+   SMS with a suppression check (§7).
+
+**P2: quality and reliability**
+7. Reject acceptance of an expired quote (§8).
+8. Return 409 for a Stripe event that is still processing (§8).
+9. Shared rate-limit storage on Cloudflare (§8).
+10. Team page shows teammates' names (`profiles` RLS, §8); `sendSms` uses
+    the workspace's number for manual SMS and campaigns (§8).
+11. Count owner alerts against `usage.sms`; measure cost per call.
+
+**P3: enhancements**
+12. A real linter (ESLint with React hooks rules) in CI.
+13. Ownership transfer, platform-admin role and setup console (§8).
+14. New Stripe plans for the receptionist offer (§4).
+
+**Next recommended task:** P0 #1–2. Everything built since September assumes
+the migrations are on live, and the invite, removal and call flows have only
+been tested against mocks.
