@@ -180,3 +180,40 @@ begin
   select product_surface into surface from public.workspaces where id = jobrin_test.id('ws_a');
   perform jobrin_test.expect('a newly created workspace starts receptionist-first', surface = 'receptionist', format('(%s)', surface));
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- 6. Removing a member's access (PATCH /api/team/members/:id sets
+--    status = 'disabled'). Their JWT stays valid until it expires, so the
+--    database itself must stop admitting them, not just the API.
+-- ---------------------------------------------------------------------------
+update public.workspace_members set status = 'disabled'
+  where workspace_id = jobrin_test.id('ws_a') and user_id = jobrin_test.id('staff_a');
+
+do $$
+declare t text; n integer; leaks text[] := '{}';
+begin
+  foreach t in array array['customers','leads','calls','notifications','conversations','messages','receptionist_profiles','knowledge_documents','audit_logs','workspace_phone_numbers'] loop
+    n := jobrin_test.count_as('staff_a', format('select count(*) from public.%I where workspace_id = %L', t, jobrin_test.id('ws_a')));
+    if n > 0 then leaks := leaks || format('%s=%s', t, n); end if;
+  end loop;
+  perform jobrin_test.expect('a disabled member can no longer read the workspace', cardinality(leaks) = 0, array_to_string(leaks, ', '));
+  n := jobrin_test.count_as('staff_a', format('select count(*) from storage.objects where name like %L', jobrin_test.id('ws_a')::text || '/%'));
+  perform jobrin_test.expect('a disabled member can no longer read workspace files', n = 0, format('(saw %s)', n));
+end $$;
+
+select jobrin_test.expect_denied('a disabled member cannot create leads', 'staff_a',
+  format($q$insert into public.leads (workspace_id, title) values (%L, 'after removal')$q$, jobrin_test.id('ws_a')));
+select jobrin_test.expect_denied('a disabled member cannot update leads', 'staff_a',
+  format($q$update public.leads set title = 'changed after removal' where workspace_id = %L$q$, jobrin_test.id('ws_a')));
+select jobrin_test.expect_denied('a disabled member cannot re-enable themselves', 'staff_a',
+  format($q$update public.workspace_members set status = 'active' where workspace_id = %L and user_id = %L$q$, jobrin_test.id('ws_a'), jobrin_test.id('staff_a')));
+
+-- Restoring access works again (so the probes above are not vacuous).
+update public.workspace_members set status = 'active'
+  where workspace_id = jobrin_test.id('ws_a') and user_id = jobrin_test.id('staff_a');
+do $$
+declare n integer;
+begin
+  n := jobrin_test.count_as('staff_a', format('select count(*) from public.leads where workspace_id = %L', jobrin_test.id('ws_a')));
+  perform jobrin_test.expect('a re-enabled member can read the workspace again', n >= 1, format('(saw %s)', n));
+end $$;

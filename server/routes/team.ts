@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { asyncRoute, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireSensitiveAuth, requireWorkspace, supabaseAdmin, type AuthenticatedRequest, writeAudit } from '../supabase';
 import { env } from '../env';
+import { ASSIGNABLE_MEMBER_ROLES, decideMemberChange, type MemberChangeDenial } from '../../shared/teamPolicy';
 
 const router = Router();
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('crm.core'));
@@ -101,6 +102,82 @@ router.post('/invites', requireRole('owner', 'admin'), requireSensitiveAuth, val
 
   await writeAudit(req, 'team.member_invited', 'workspace_member', userId, { role: req.body.role }, 'warning');
   res.status(201).json({ member, invited: true });
+}));
+
+// Change a member's role, or disable/re-enable their access. Disabling takes
+// effect on the member's next request: requireWorkspace and every RLS policy
+// admit only `active` memberships. The membership row is kept (not deleted)
+// so the audit history stays attached and access can be restored.
+const MEMBER_CHANGE_MESSAGES: Record<MemberChangeDenial, string> = {
+  INSUFFICIENT_ROLE: 'Only the workspace owner or an admin can change members.',
+  CANNOT_CHANGE_SELF: 'You cannot change your own role or access.',
+  CANNOT_CHANGE_OWNER: "The workspace owner's access cannot be changed here.",
+  ONLY_OWNER_CAN_MANAGE_ADMINS: 'Only the workspace owner can manage admins.',
+  NOTHING_TO_CHANGE: 'Choose a role or an access change.',
+};
+
+const memberChangeSchema = z.object({
+  role: z.enum(ASSIGNABLE_MEMBER_ROLES).optional(),
+  status: z.enum(['active', 'disabled']).optional(),
+}).strict();
+
+router.patch('/members/:userId', requireRole('owner', 'admin'), requireSensitiveAuth, validateBody(memberChangeSchema), asyncRoute(async (req: AuthenticatedRequest, res) => {
+  if (!env.SUPABASE_SERVICE_ROLE_KEY) {
+    return res.status(503).json({ error: 'MEMBER_CHANGES_REQUIRE_SERVICE_ROLE', message: 'Add the Supabase service-role key to the server environment to manage members.' });
+  }
+  const targetUserId = String(req.params.userId || '');
+  if (!/^[0-9a-fA-F-]{36}$/.test(targetUserId)) return res.status(400).json({ error: 'VALIDATION_FAILED' });
+
+  // Read the target through the workspace the caller was verified against,
+  // never a workspace supplied in the body.
+  const { data: target, error: readError } = await supabaseAdmin
+    .from('workspace_members')
+    .select('user_id,role,status')
+    .eq('workspace_id', req.workspaceId!)
+    .eq('user_id', targetUserId)
+    .maybeSingle();
+  if (readError) return res.status(500).json({ error: 'TEAM_MEMBER_READ_FAILED' });
+  if (!target) return res.status(404).json({ error: 'MEMBER_NOT_FOUND', message: 'That person is not a member of this workspace.' });
+
+  const decision = decideMemberChange({
+    actorUserId: req.auth!.userId,
+    actorRole: req.workspaceRole,
+    targetUserId,
+    targetRole: target.role,
+    change: req.body,
+  });
+  if ('error' in decision) {
+    return res.status(decision.error === 'NOTHING_TO_CHANGE' ? 400 : 403).json({ error: decision.error, message: MEMBER_CHANGE_MESSAGES[decision.error] });
+  }
+
+  const changes: { role?: string; status?: string } = {};
+  if (req.body.role && req.body.role !== target.role) changes.role = req.body.role;
+  if (req.body.status && req.body.status !== target.status) changes.status = req.body.status;
+  if (!Object.keys(changes).length) return res.json({ member: target, changed: false });
+
+  // Conditional on the role and status just read, so a concurrent change (for
+  // example the target being promoted to owner) cannot be overwritten.
+  const { data: member, error: updateError } = await supabaseAdmin
+    .from('workspace_members')
+    .update(changes)
+    .eq('workspace_id', req.workspaceId!)
+    .eq('user_id', targetUserId)
+    .eq('role', target.role)
+    .eq('status', target.status)
+    .neq('role', 'owner')
+    .select('user_id,role,status,created_at')
+    .maybeSingle();
+  if (updateError) return res.status(500).json({ error: 'TEAM_MEMBER_UPDATE_FAILED' });
+  if (!member) return res.status(409).json({ error: 'MEMBER_CHANGED_CONCURRENTLY', message: 'This member was changed by someone else just now. Refresh and try again.' });
+
+  const action = changes.status === 'disabled' ? 'team.member_disabled'
+    : changes.status === 'active' ? 'team.member_enabled'
+      : 'team.member_role_changed';
+  await writeAudit(req, action, 'workspace_member', targetUserId, {
+    from: { role: target.role, status: target.status },
+    to: { role: member.role, status: member.status },
+  }, 'warning');
+  res.json({ member, changed: true });
 }));
 
 export default router;
