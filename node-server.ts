@@ -1,3 +1,4 @@
+import http from 'node:http';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import express from 'express';
@@ -9,13 +10,20 @@ import { startAutomationRunner } from './server/automation/runner';
 import { attachReceptionistWebSocket } from './server/ws/receptionistSocket';
 
 async function startServer() {
+  // One HTTP server for the API, the SPA, the receptionist WebSocket and (in
+  // dev) Vite's HMR socket, so everything is reachable through a single port.
+  const server = http.createServer(app);
   let vite: Awaited<ReturnType<typeof import('vite').createServer>> | null = null;
   // Runtime mode controls whether Vite middleware is needed. Deployment stage
   // separately controls production secret enforcement, allowing a compiled
   // local preview without falsely declaring it a production deployment.
   if (env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
-    vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
+    // Without hmr.server, Vite opens HMR on a separate port (24678) that
+    // previews, tunnels and reverse proxies don't forward, leaving the client
+    // stuck on "[vite] connecting..." and reload-looping.
+    const hmr = process.env.DISABLE_HMR === 'true' ? false : { server };
+    vite = await createViteServer({ server: { middlewareMode: true, hmr }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist', 'client');
@@ -47,7 +55,7 @@ async function startServer() {
   });
 
   finalizeApp();
-  const server = app.listen(env.PORT, '0.0.0.0', () => {
+  server.listen(env.PORT, '0.0.0.0', () => {
     console.log(JSON.stringify({ level: 'info', message: 'Jobrin.ai server started', port: env.PORT, environment: env.NODE_ENV }));
     if (env.SUPABASE_SERVICE_ROLE_KEY && openaiConfigured()) startBusinessBrainWorker();
     if (env.SUPABASE_SERVICE_ROLE_KEY) startAutomationRunner();
