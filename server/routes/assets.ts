@@ -1,14 +1,14 @@
 // Assets & Service History: per-customer asset register with service tracking.
 import { Router } from 'express';
 import { z } from 'zod';
-import { applyKeysetCursor, asyncRoute, buildPage, parseCursor, validateBody } from '../security';
+import { applyKeysetCursor, asyncRoute, buildPage, parseCursor, patchSchema, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest, writeAudit } from '../supabase';
 
 const router = Router();
 router.use(requireAuth, requireWorkspace, requireActiveSubscription('crm.core'));
 
 const assetSchema = z.object({
-  customer_id: z.string().uuid(),
+  customer_id: z.guid(),
   name: z.string().trim().min(2).max(200),
   asset_type: z.string().trim().min(1).max(100),
   make: z.string().trim().max(160).nullable().optional(),
@@ -41,7 +41,7 @@ router.post('/', requireRole('owner', 'admin', 'manager', 'staff'), validateBody
   res.status(201).json({ asset: data });
 }));
 
-router.patch('/:id', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(assetSchema.partial()), asyncRoute(async (req: AuthenticatedRequest, res) => {
+router.patch('/:id', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(patchSchema(assetSchema)), asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   // Retargeting the customer must not cross tenants: the row's own workspace
   // RLS policy passes even when customer_id points at another workspace's

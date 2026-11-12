@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { asyncRoute, validateBody } from '../security';
+import { asyncRoute, patchSchema, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest, writeAudit } from '../supabase';
 
 const router = Router();
@@ -35,7 +35,7 @@ router.post('/', requireRole('owner','admin','manager'), validateBody(serviceSch
   res.status(201).json({ service: data });
 }));
 
-router.patch('/:id', requireRole('owner','admin','manager'), validateBody(serviceSchema.partial()), asyncRoute(async (req: AuthenticatedRequest, res) => {
+router.patch('/:id', requireRole('owner','admin','manager'), validateBody(patchSchema(serviceSchema)), asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const { data, error } = await db.from('services')
     .update({ ...req.body, updated_at: new Date().toISOString() })
@@ -127,7 +127,7 @@ router.post('/areas', requireRole('owner','admin','manager'), validateBody(areaS
   res.status(201).json({ area: data });
 }));
 
-router.patch('/areas/:id', requireRole('owner','admin','manager'), validateBody(areaSchema.partial()), asyncRoute(async (req: AuthenticatedRequest, res) => {
+router.patch('/areas/:id', requireRole('owner','admin','manager'), validateBody(patchSchema(areaSchema)), asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const { data, error } = await db.from('service_areas')
     .update(req.body)

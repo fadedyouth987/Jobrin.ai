@@ -6,7 +6,7 @@
 // technician logs materials against a specific job on site.
 import { Router } from 'express';
 import { z } from 'zod';
-import { applyKeysetCursor, asyncRoute, buildPage, dbErrorMessage, parseCursor, validateBody } from '../security';
+import { applyKeysetCursor, asyncRoute, buildPage, dbErrorMessage, parseCursor, patchSchema, validateBody } from '../security';
 import { createUserClient, requireActiveSubscription, requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest, writeAudit } from '../supabase';
 
 const router = Router();
@@ -40,7 +40,7 @@ router.post('/suppliers', requireRole('owner', 'admin', 'manager', 'staff'), val
   res.status(201).json({ supplier: data });
 }));
 
-router.patch('/suppliers/:id', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(supplierSchema.partial()), asyncRoute(async (req: AuthenticatedRequest, res) => {
+router.patch('/suppliers/:id', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(patchSchema(supplierSchema)), asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const patch: Record<string, unknown> = { ...req.body };
   if ('contact_email' in patch) patch.contact_email = patch.contact_email || null;
@@ -56,7 +56,7 @@ router.patch('/suppliers/:id', requireRole('owner', 'admin', 'manager', 'staff')
 // ---------- Supplier price book items ----------
 
 const priceBookItemSchema = z.object({
-  supplier_id: z.string().uuid(),
+  supplier_id: z.guid(),
   sku: z.string().trim().max(120).nullable().optional(),
   description: z.string().trim().min(2).max(300),
   unit_cost_cents: z.number().int().min(0).max(100_000_000),
@@ -89,7 +89,7 @@ router.post('/price-book', requireRole('owner', 'admin', 'manager'), validateBod
   res.status(201).json({ item: data });
 }));
 
-router.patch('/price-book/:id', requireRole('owner', 'admin', 'manager'), validateBody(priceBookItemSchema.partial().omit({ supplier_id: true })), asyncRoute(async (req: AuthenticatedRequest, res) => {
+router.patch('/price-book/:id', requireRole('owner', 'admin', 'manager'), validateBody(patchSchema(priceBookItemSchema.omit({ supplier_id: true }))), asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
   const patch: Record<string, unknown> = { ...req.body, updated_at: new Date().toISOString() };
   if ('sku' in patch) patch.sku = patch.sku || null;
@@ -112,7 +112,7 @@ const importRowSchema = z.object({
 });
 
 router.post('/price-book/import', requireRole('owner', 'admin', 'manager'), validateBody(z.object({
-  supplier_id: z.string().uuid(),
+  supplier_id: z.guid(),
   rows: z.array(importRowSchema).min(1).max(2000),
 })), asyncRoute(async (req: AuthenticatedRequest, res) => {
   const db = createUserClient(req.auth!.accessToken);
@@ -146,8 +146,8 @@ router.post('/price-book/import', requireRole('owner', 'admin', 'manager'), vali
 // ---------- Purchase orders ----------
 
 const poSchema = z.object({
-  supplier_id: z.string().uuid(),
-  job_id: z.string().uuid().nullable().optional(),
+  supplier_id: z.guid(),
+  job_id: z.guid().nullable().optional(),
 });
 
 router.get('/purchase-orders', asyncRoute(async (req: AuthenticatedRequest, res) => {
@@ -198,7 +198,7 @@ const poItemSchema = z.object({
   description: z.string().trim().min(2).max(300),
   quantity: z.number().positive().max(100_000),
   unit_cost_cents: z.number().int().min(0).max(100_000_000),
-  price_book_item_id: z.string().uuid().nullable().optional(),
+  price_book_item_id: z.guid().nullable().optional(),
 });
 
 router.post('/purchase-orders/:id/items', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(poItemSchema), asyncRoute(async (req: AuthenticatedRequest, res) => {

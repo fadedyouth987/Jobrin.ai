@@ -28,10 +28,10 @@ router.get('/appointments', asyncRoute(async (req: AuthenticatedRequest, res) =>
 }));
 
 router.post('/appointments', requireRole('owner','admin','manager','staff'), validateBody(z.object({
-  customer_id: z.string().uuid().nullable().optional(),
-  lead_id: z.string().uuid().nullable().optional(),
-  service_id: z.string().uuid().nullable().optional(),
-  assigned_user_id: z.string().uuid().nullable().optional(),
+  customer_id: z.guid().nullable().optional(),
+  lead_id: z.guid().nullable().optional(),
+  service_id: z.guid().nullable().optional(),
+  assigned_user_id: z.guid().nullable().optional(),
   title: z.string().trim().min(2).max(200),
   address_text: z.string().trim().max(500).nullable().optional(),
   starts_at: z.string().datetime(),
@@ -97,14 +97,14 @@ router.get('/jobs/:id', asyncRoute(async (req: AuthenticatedRequest, res) => {
 }));
 
 router.post('/jobs', requireRole('owner','admin','manager','staff'), validateBody(z.object({
-  customer_id: z.string().uuid().nullable().optional(),
-  lead_id: z.string().uuid().nullable().optional(),
-  appointment_id: z.string().uuid().nullable().optional(),
-  service_id: z.string().uuid().nullable().optional(),
+  customer_id: z.guid().nullable().optional(),
+  lead_id: z.guid().nullable().optional(),
+  appointment_id: z.guid().nullable().optional(),
+  service_id: z.guid().nullable().optional(),
   title: z.string().trim().min(2).max(200),
   description: z.string().trim().max(5000).default(''),
   address_text: z.string().trim().max(500).nullable().optional(),
-  assigned_user_id: z.string().uuid().nullable().optional(),
+  assigned_user_id: z.guid().nullable().optional(),
   scheduled_start: z.string().datetime().nullable().optional(),
   scheduled_end: z.string().datetime().nullable().optional(),
 })), asyncRoute(async (req: AuthenticatedRequest, res) => {
@@ -118,7 +118,7 @@ router.post('/jobs', requireRole('owner','admin','manager','staff'), validateBod
 router.patch('/jobs/:id/schedule', requireRole('owner','admin','manager','staff'), validateBody(z.object({
   scheduled_start: z.string().datetime(),
   scheduled_end: z.string().datetime(),
-  assigned_user_id: z.string().uuid().nullable().optional(),
+  assigned_user_id: z.guid().nullable().optional(),
 })), asyncRoute(async (req: AuthenticatedRequest, res) => {
   if (new Date(req.body.scheduled_end) <= new Date(req.body.scheduled_start)) return res.status(400).json({ error: 'INVALID_TIME_RANGE' });
   const db = createUserClient(req.auth!.accessToken);
@@ -278,8 +278,8 @@ router.get('/service-agreements', requireRole('owner', 'admin', 'manager', 'staf
 }));
 
 router.post('/service-agreements', requireRole('owner', 'admin', 'manager'), validateBody(z.object({
-  customer_id: z.string().uuid(),
-  service_id: z.string().uuid().nullable().optional(),
+  customer_id: z.guid(),
+  service_id: z.guid().nullable().optional(),
   name: z.string().trim().min(2).max(200),
   cadence: z.enum(AGREEMENT_CADENCES),
   price_cents: z.number().int().min(0).max(100_000_000).default(0),
@@ -427,7 +427,7 @@ router.get('/jobs/:id/checklists', requireRole('owner', 'admin', 'manager', 'sta
 }));
 
 router.post('/jobs/:id/checklists', requireRole('owner', 'admin', 'manager', 'staff'), validateBody(z.object({
-  template_id: z.string().uuid().nullable().optional(),
+  template_id: z.guid().nullable().optional(),
   title: z.string().trim().min(2).max(200),
   results: z.array(z.object({ item: z.string().trim().min(1).max(300), done: z.boolean(), critical: z.boolean().default(false), notes: z.string().max(500).default('') })).min(1).max(50),
 })), asyncRoute(async (req: AuthenticatedRequest, res) => {
@@ -692,8 +692,8 @@ router.get('/quotes/:id/pdf', asyncRoute(async (req: AuthenticatedRequest, res) 
 }));
 
 router.post('/quotes', requireRole('owner','admin','manager','staff'), validateBody(z.object({
-  customer_id: z.string().uuid(),
-  job_id: z.string().uuid().nullable().optional(),
+  customer_id: z.guid(),
+  job_id: z.guid().nullable().optional(),
   expires_at: z.string().datetime().nullable().optional(),
   terms: z.string().trim().max(5000).default(''),
   notes: z.string().trim().max(5000).default(''),
@@ -913,9 +913,9 @@ async function createInvoicePaymentSession(params: {
 }
 
 router.post('/invoices', requireRole('owner','admin','manager','staff'), validateBody(z.object({
-  customer_id: z.string().uuid(),
-  job_id: z.string().uuid().nullable().optional(),
-  quote_id: z.string().uuid().nullable().optional(),
+  customer_id: z.guid(),
+  job_id: z.guid().nullable().optional(),
+  quote_id: z.guid().nullable().optional(),
   due_at: z.string().datetime().nullable().optional(),
   items: documentItems,
 })), asyncRoute(async (req: AuthenticatedRequest, res) => {

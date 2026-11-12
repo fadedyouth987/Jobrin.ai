@@ -48,7 +48,7 @@ test('a purchase order may optionally link to a job, and a bogus job id is rejec
   const purchasingSource = source('server/routes/purchasing.ts');
   const routeAt = purchasingSource.indexOf("router.post('/purchase-orders',");
   const routeBody = purchasingSource.slice(routeAt, purchasingSource.indexOf("router.post('/purchase-orders/:id/items'", routeAt));
-  assert.match(purchasingSource, /job_id: z\.string\(\)\.uuid\(\)\.nullable\(\)\.optional\(\)/);
+  assert.match(purchasingSource, /job_id: z\.guid\(\)\.nullable\(\)\.optional\(\)/);
   assert.match(routeBody, /if \(req\.body\.job_id\) \{/);
   assert.match(routeBody, /JOB_NOT_FOUND/);
   // The job lookup must be scoped to the caller's own workspace, never a bare id lookup.

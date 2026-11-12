@@ -86,8 +86,8 @@ router.post('/customers', requireRole('owner','admin','manager','staff'), valida
 }));
 
 const leadInput = z.object({
-  customer_id: z.string().uuid().nullable().optional(),
-  service_id: z.string().uuid().nullable().optional(),
+  customer_id: z.guid().nullable().optional(),
+  service_id: z.guid().nullable().optional(),
   title: z.string().trim().min(2).max(200),
   description: z.string().trim().max(5000).default(''),
   source: z.string().trim().max(100).nullable().optional(),

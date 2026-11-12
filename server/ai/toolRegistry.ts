@@ -10,7 +10,7 @@ export type OperatorTool = {
   schema: z.ZodTypeAny;
 };
 
-const uuid = z.string().uuid();
+const uuid = z.guid();
 export const operatorTools: readonly OperatorTool[] = [
   { name:'customer.lookup', description:'Find a customer using verified workspace records.', risk:'automatic', specialist:'triage', schema:z.object({ query:z.string().trim().min(2).max(200) }).strict() },
   { name:'availability.check', description:'Read available appointment windows.', risk:'automatic', specialist:'scheduler', schema:z.object({ serviceId:uuid.optional(), from:z.string().datetime(), to:z.string().datetime() }).strict() },

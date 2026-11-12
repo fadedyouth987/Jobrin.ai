@@ -8,13 +8,13 @@ import { emptyMessagingResponse, normalizeE164, sendSms, twilioConfigured, valid
 const router = Router();
 const webhookRouter = Router();
 const sendSchema = z.object({
-  customer_id: z.string().uuid(),
-  conversation_id: z.string().uuid().optional(),
+  customer_id: z.guid(),
+  conversation_id: z.guid().optional(),
   purpose: z.enum(['transactional', 'marketing', 'support']).default('support'),
   body: z.string().trim().min(1).max(1600),
 });
 const consentSchema = z.object({
-  customer_id: z.string().uuid(),
+  customer_id: z.guid(),
   channel: z.enum(['email', 'sms', 'phone']),
   purpose: z.enum(['transactional', 'marketing', 'support', 'recording']),
   granted: z.boolean(),
