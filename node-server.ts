@@ -23,7 +23,14 @@ async function startServer() {
     // previews, tunnels and reverse proxies don't forward, leaving the client
     // stuck on "[vite] connecting..." and reload-looping.
     const hmr = process.env.DISABLE_HMR === 'true' ? false : { server };
-    vite = await createViteServer({ server: { middlewareMode: true, hmr }, appType: 'spa' });
+    // Vite's DNS-rebinding guard answers 403 "Blocked request. This host is
+    // not allowed" to any Host other than localhost, which breaks previews,
+    // tunnels and LAN access. Dev-only server; narrow it with
+    // DEV_ALLOWED_HOSTS=host1,host2 if you want the guard back.
+    const allowedHosts = process.env.DEV_ALLOWED_HOSTS
+      ? process.env.DEV_ALLOWED_HOSTS.split(',').map((h) => h.trim()).filter(Boolean)
+      : true;
+    vite = await createViteServer({ server: { middlewareMode: true, hmr, allowedHosts }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist', 'client');
