@@ -106,7 +106,7 @@ test('a peek request only requires service_id, never name/phone/slot_start', () 
   assert.ok(peekSchemaMatch, 'expected a peekSchema definition in the booking handler');
   const peekSchema = peekSchemaMatch![0];
   assert.match(peekSchema, /peek:\s*z\.literal\(true\)/);
-  assert.match(peekSchema, /service_id:\s*z\.string\(\)\.uuid\(\)/);
+  assert.match(peekSchema, /service_id:\s*z\.guid\(\)/);
   assert.doesNotMatch(peekSchema, /customer_name/);
   assert.doesNotMatch(peekSchema, /phone/);
   assert.doesNotMatch(peekSchema, /slot_start/);

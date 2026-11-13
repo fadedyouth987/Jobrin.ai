@@ -310,10 +310,10 @@ router.post('/book/:slug', asyncRoute(async (req, res) => {
   const isPeek = (req.body as { peek?: unknown } | undefined)?.peek === true;
   const peekSchema = z.object({
     peek: z.literal(true),
-    service_id: z.string().uuid(),
+    service_id: z.guid(),
   });
   const bookSchema = z.object({
-    service_id: z.string().uuid(),
+    service_id: z.guid(),
     customer_name: z.string().trim().min(2).max(160),
     phone: z.string().trim().min(8).max(40),
     email: z.string().trim().email().max(254).nullable().optional(),

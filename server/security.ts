@@ -4,7 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { TimerFreeMemoryStore } from './rateLimitStore';
-import type { ZodTypeAny } from 'zod';
+import { z, type ZodTypeAny } from 'zod';
 import { env } from './env';
 
 export function requestId(req: Request, res: Response, next: NextFunction) {
@@ -34,22 +34,35 @@ export function securityMiddleware(): RequestHandler[] {
       }
     : false;
 
+  // Local dev server only (Vite middleware mode). Staging and production run
+  // with NODE_ENV=production and keep the strict behaviour below.
+  const devServer = env.NODE_ENV !== 'production';
+  const corsBase = {
+    credentials: false,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'x-workspace-id', 'x-request-id', 'idempotency-key'],
+  };
+
   return [
     helmet({
       contentSecurityPolicy: csp,
       crossOriginEmbedderPolicy: false,
+      // Dev previews embed the app in a frame on another origin.
+      frameguard: devServer ? false : undefined,
       referrerPolicy: { policy: 'no-referrer' },
       hsts: env.isProduction ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
     }),
-    cors({
-      credentials: false,
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Authorization', 'Content-Type', 'x-workspace-id', 'x-request-id', 'idempotency-key'],
-      origin(origin, callback) {
-        if (!origin) return callback(null, true);
-        if (env.allowedOrigins.includes(origin)) return callback(null, true);
-        return callback(new Error('CORS_ORIGIN_DENIED'));
-      },
+    cors((req, callback) => {
+      const origin = req.headers.origin;
+      if (!origin || env.allowedOrigins.includes(origin)) return callback(null, { ...corsBase, origin: true });
+      // In dev the app is often reached through a preview/tunnel hostname that
+      // isn't in CORS_ORIGINS; its own same-origin API calls must still work.
+      if (devServer) {
+        try {
+          if (new URL(origin).host === req.headers.host) return callback(null, { ...corsBase, origin: true });
+        } catch { /* malformed Origin falls through to deny */ }
+      }
+      return callback(new Error('CORS_ORIGIN_DENIED'));
     }),
   ];
 }
@@ -70,6 +83,17 @@ export const billingRateLimit = rateLimit({
   standardHeaders: 'draft-8',
   legacyHeaders: false,
 });
+
+// PATCH bodies: every field optional and NO defaults filled in. Zod v4's
+// .partial() still applies .default() values, which would silently reset
+// stored columns the client never sent. Defaults belong to create only.
+export function patchSchema<Shape extends z.ZodRawShape>(schema: z.ZodObject<Shape>) {
+  const shape: Record<string, z.ZodType> = {};
+  for (const [key, field] of Object.entries(schema.shape as unknown as Record<string, z.ZodType>)) {
+    shape[key] = (field instanceof z.ZodDefault ? field.removeDefault() : field) as z.ZodType;
+  }
+  return schema.extend(shape).partial();
+}
 
 export function validateBody(schema: ZodTypeAny): RequestHandler {
   return (req, res, next) => {

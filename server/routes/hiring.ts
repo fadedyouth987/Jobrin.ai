@@ -33,8 +33,8 @@ const candidateInput = z.object({
 const stages = ['applied', 'screening', 'interview', 'trial', 'offered', 'hired', 'rejected', 'withdrawn'] as const;
 type ApplicationStage = (typeof stages)[number];
 const applicationInput = z.object({
-  job_opening_id: z.string().uuid(),
-  candidate_id: z.string().uuid(),
+  job_opening_id: z.guid(),
+  candidate_id: z.guid(),
   notes: z.string().trim().max(5000).default(''),
 });
 

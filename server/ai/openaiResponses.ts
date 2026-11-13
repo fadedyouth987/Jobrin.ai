@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { env } from '../env';
 import { openaiConfigured } from '../providers/openai';
 
-const candidateSchema=z.object({candidates:z.array(z.object({scopeType:z.enum(['workspace','customer','property','asset','service','job_type','technician','communication']),scopeId:z.string().uuid().nullable(),category:z.enum(['fact','preference','heuristic','aggregate','prediction']),memoryKey:z.string().min(3).max(160),structuredValue:z.record(z.string(),z.unknown()),summary:z.string().min(3).max(500),sensitivity:z.enum(['normal','restricted','sensitive']),reason:z.string().min(3).max(500),conflictsWith:z.array(z.string().uuid()).max(20)}).strict()).max(8)}).strict();
+const candidateSchema=z.object({candidates:z.array(z.object({scopeType:z.enum(['workspace','customer','property','asset','service','job_type','technician','communication']),scopeId:z.guid().nullable(),category:z.enum(['fact','preference','heuristic','aggregate','prediction']),memoryKey:z.string().min(3).max(160),structuredValue:z.record(z.string(),z.unknown()),summary:z.string().min(3).max(500),sensitivity:z.enum(['normal','restricted','sensitive']),reason:z.string().min(3).max(500),conflictsWith:z.array(z.guid()).max(20)}).strict()).max(8)}).strict();
 export type ExtractedCandidates=z.infer<typeof candidateSchema>;
 
 export async function extractMemoryCandidates(input:{eventKey:string;proposal:unknown;finalValue:unknown;learningIntent:string;existingSummaries:Array<{id:string;summary:string}>}){
